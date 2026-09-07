@@ -3,14 +3,10 @@ import os
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
 from .state import AgentState, ClassificationResult, ExecutionPlanResult, EscalateResult
+from src.config import get_llms
 
-# Configuration (Points to Nebius if NEBIUS_API_KEY is set, else defaults to OpenAI for testing)
-api_key = os.getenv("NEBIUS_API_KEY", os.getenv("OPENAI_API_KEY", "dummy"))
-base_url = "https://api.studio.nebius.ai/v1/" if os.getenv("NEBIUS_API_KEY") else None
-
-# Initialize LLM Models (Using gpt-4o-mini as a proxy for Nemotron Nano if Nebius is not configured yet)
-llm_nano = ChatOpenAI(model="gpt-4o-mini", temperature=0.0, api_key=api_key, base_url=base_url)
-llm_super = ChatOpenAI(model="gpt-4o", temperature=0.0, api_key=api_key, base_url=base_url)
+# Initialize LLM Models via Factory
+llm_nano, llm_super = get_llms()
 
 async def classify_node(state: AgentState) -> dict:
     """Node 1: Evaluates ticket and assigns Risk Level (Async)."""
