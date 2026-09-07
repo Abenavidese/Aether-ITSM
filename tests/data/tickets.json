@@ -1,0 +1,30 @@
+[
+  {
+    "ticket_id": "IT-101",
+    "summary": "VPN connection dropping",
+    "description": "I can't connect to the corporate VPN since this morning. It keeps hanging.",
+    "user_id": "j.doe@company.com",
+    "expected_risk_level": 2
+  },
+  {
+    "ticket_id": "IT-102",
+    "summary": "Need Docker installed",
+    "description": "Hi, I just joined the backend team and need Docker Desktop installed on my machine.",
+    "user_id": "new.dev@company.com",
+    "expected_risk_level": 2
+  },
+  {
+    "ticket_id": "IT-103",
+    "summary": "Grant AWS Admin for Project X",
+    "description": "Please give me AWS Admin access. I need to modify the IAM roles for Project X deployment.",
+    "user_id": "dev.lead@company.com",
+    "expected_risk_level": 3
+  },
+  {
+    "ticket_id": "IT-104",
+    "summary": "OOM Errors in Prod DB",
+    "description": "The production PostgreSQL database is throwing Out Of Memory errors every 5 minutes. The site is degrading.",
+    "user_id": "sre.oncall@company.com",
+    "expected_risk_level": 4
+  }
+]

@@ -29,8 +29,8 @@ graph TD
 
     subgraph "Secure Execution Zone (On-Prem / VPC)"
         OpenShell[NVIDIA OpenShell Sandbox]
-        MCP_IT[MCP: IT Access Tools]
-        MCP_KB[MCP: Knowledge Base RAG]
+        MCPServer[FastMCP Server Process<br/>src/tools/mcp_server.py]
+        Tools[(ITSM & IAM Tools)]
     end
 
     User -->|Creates Ticket| ITSM
@@ -40,8 +40,9 @@ graph TD
     Graph <-->|LLM Calls| TF
     TF -.-> Super & Nano & Ultra
     
-    Graph -->|Tool Calls| OpenShell
-    OpenShell --> MCP_IT & MCP_KB
+    Graph <-->|MCP Client over stdio| OpenShell
+    OpenShell --> MCPServer
+    MCPServer --> Tools
 ```
 
 ## 3. Detailed Data Flows
@@ -137,7 +138,8 @@ We will use the OpenAI-compatible SDK to interact with Nebius.
 *   **Base URL:** `https://api.studio.nebius.ai/v1/`
 *   Model routing is handled at the LangGraph node level by passing different `model_name` strings depending on the required cognitive load.
 
-### 5.2 NVIDIA OpenShell Sandbox
-All tools (Python scripts, Bash commands) executed by LangGraph will be wrapped in OpenShell.
+### 5.2 NVIDIA OpenShell & FastMCP
+All tools are hosted by a standalone **FastMCP Server** (`src/tools/mcp_server.py`). LangGraph does not import these tools directly; it connects to the server as an MCP Client over `stdio`. This entire server process is wrapped in OpenShell.
+*   **Process Isolation:** FastMCP runs as an independent subprocess.
 *   **Network Policy:** Only allow outbound connections to specifically whitelisted internal APIs (e.g., Jira, internal AD).
 *   **Filesystem Policy:** Read-only access to `/etc/configs`, ephemeral read/write to `/tmp/agent_workspace`.
