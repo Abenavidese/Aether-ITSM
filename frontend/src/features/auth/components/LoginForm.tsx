@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../../../context/AuthContext';
+import { config } from '../../../config';
 import { Mail, ArrowRight, Eye, EyeOff, LockKeyhole } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -17,7 +18,7 @@ export function LoginForm() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(`${config.API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })

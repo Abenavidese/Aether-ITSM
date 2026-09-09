@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { config } from '../../../config';
 
 interface RegisterFormState {
   // Step 1: Account
@@ -108,7 +109,7 @@ export function useRegisterForm(): UseRegisterFormReturn {
         primary_goal: form.primaryGoal,
       };
 
-      const registerRes = await fetch('/api/auth/register', {
+      const registerRes = await fetch(`${config.API_BASE_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -120,7 +121,7 @@ export function useRegisterForm(): UseRegisterFormReturn {
       }
 
       // Auto-Login
-      const loginRes = await fetch('/api/auth/login', {
+      const loginRes = await fetch(`${config.API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, password: form.password }),
