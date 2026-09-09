@@ -16,7 +16,7 @@ db = SessionLocal()
 try:
     user = UserCreate(
         email="admin@manitas.com",
-        password="password123",
+        password="Admin123!",
         company_name="Manitas",
         role="superadmin"
     )
@@ -24,7 +24,7 @@ try:
     print(f"Seed successful!")
     print(f"Company ID: {created_user.company_id}")
     print(f"User Email: admin@manitas.com")
-    print(f"User Password: password123")
+    print(f"User Password: Admin123!")
 except Exception as e:
     print(f"Seed failed (maybe already seeded?): {e}")
 finally:

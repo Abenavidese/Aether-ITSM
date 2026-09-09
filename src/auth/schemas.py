@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 import re
 
 class Token(BaseModel):
@@ -32,6 +33,7 @@ class UserCreate(BaseModel):
     role: str = Field(default="superadmin", pattern=r"^(superadmin|user)$")
 
 class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     email: str
     role: str

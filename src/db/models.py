@@ -4,9 +4,6 @@ from sqlalchemy.orm import relationship
 from .database import Base
 import uuid
 
-def generate_uuid():
-    return str(uuid.uuid4())
-
 class Company(Base):
     __tablename__ = "companies"
 
