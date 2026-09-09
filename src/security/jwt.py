@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta
 import os
 
-# In production, this should be a secure random string stored in .env
+# Use a secure random string stored in .env, with a fallback for dev
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super-secret-key-for-hackathon-only")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours

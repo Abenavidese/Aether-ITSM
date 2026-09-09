@@ -44,6 +44,7 @@ class AgentState(TypedDict):
     
     # Core ticket metadata
     ticket_id: str
+    company_id: str
     user_context: dict
     
     # State tracking variables populated by nodes
