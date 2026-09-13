@@ -6,6 +6,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from src.api.routes import router as webhook_router
 from src.auth.router import router as auth_router
+from src.tenant.router import router as tenant_router
 from src.db.database import engine
 from src.db import models
 from src.config import get_settings
@@ -50,6 +51,7 @@ app.add_middleware(
 
 app.include_router(webhook_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(tenant_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():

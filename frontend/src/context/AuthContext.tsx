@@ -7,6 +7,7 @@ interface User {
   email: string;
   role: string;
   tenant_id: string;
+  onboarding_completed: string;
 }
 
 interface AuthContextType {

@@ -26,7 +26,8 @@ def login(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
         "sub": user.id,
         "email": user.email,
         "role": user.role,
-        "tenant_id": user.company_id
+        "tenant_id": user.company_id,
+        "onboarding_completed": user.company.onboarding_completed
     }
     
     access_token = create_access_token(data=token_data)

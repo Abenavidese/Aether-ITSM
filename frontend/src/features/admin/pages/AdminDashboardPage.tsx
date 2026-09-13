@@ -12,7 +12,7 @@ export function AdminDashboardPage() {
     <div className="max-w-7xl mx-auto">
       <header className="flex justify-between items-end mb-8 border-b border-slate-800 pb-4">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent mb-1">
             IT Command Center
           </h1>
           <p className="text-slate-400 text-sm mt-1">Aether ITSM Admin Dashboard</p>
@@ -20,7 +20,7 @@ export function AdminDashboardPage() {
         
         <button 
           onClick={runSimulation}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium transition-colors mb-2"
         >
           <PlayCircle size={20} />
           Simulate Batch
@@ -43,10 +43,10 @@ export function AdminDashboardPage() {
            <GraphVisualizer activeNode={activeNode} />
         </div>
 
-        <div className="col-span-3">
-          <HumanGatePanel tickets={tickets} onApprove={approveTicket} />
+          <div className="col-span-3">
+            <HumanGatePanel tickets={tickets} onApprove={approveTicket} />
+          </div>
         </div>
-      </div>
     </div>
   );
 }

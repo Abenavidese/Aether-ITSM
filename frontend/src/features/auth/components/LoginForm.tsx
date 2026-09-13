@@ -5,8 +5,8 @@ import { Mail, ArrowRight, Eye, EyeOff, LockKeyhole } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export function LoginForm() {
-  const [email, setEmail] = useState('admin@manitas.com');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -77,9 +77,9 @@ export function LoginForm() {
             <label className="text-sm font-medium text-slate-300">
               Password
             </label>
-            <a href="#" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
+            <Link to="/forgot-password" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
               Forgot password?
-            </a>
+            </Link>
           </div>
           <div className="relative group">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">

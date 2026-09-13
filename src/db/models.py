@@ -12,6 +12,17 @@ class Company(Base):
     company_size = Column(String, nullable=True)
     industry = Column(String, nullable=True)
     current_tool = Column(String, nullable=True)
+    
+    # Integration & Onboarding Settings
+    onboarding_completed = Column(String, default="false") # SQLite boolean compatibility
+    api_key = Column(String, unique=True, nullable=True) # Kept for legacy/SDK
+    webhook_url = Column(String, nullable=True) # Kept for legacy
+    github_token = Column(String, nullable=True)
+    github_repo = Column(String, nullable=True)
+    mcp_server_url = Column(String, nullable=True)
+    mcp_auth_token = Column(String, nullable=True)
+    llm_engine = Column(String, default="nemotron-nano")
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     users = relationship("User", back_populates="company")

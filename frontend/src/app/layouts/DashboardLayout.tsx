@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { LayoutDashboard, MessageSquare, LogOut } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, LogOut, Settings } from 'lucide-react';
 
 function Navigation() {
   const location = useLocation();
@@ -15,6 +15,9 @@ function Navigation() {
         </Link>
         <Link to="/admin" className={`p-3 rounded-xl transition-all ${location.pathname === '/admin' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`} title="IT Admin">
           <LayoutDashboard size={24} />
+        </Link>
+        <Link to="/admin/settings" className={`p-3 rounded-xl transition-all ${location.pathname.includes('/settings') ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`} title="Settings">
+          <Settings size={24} />
         </Link>
       </div>
       <button onClick={logout} className="p-3 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-xl transition-all" title="Logout">
@@ -37,6 +40,17 @@ export function DashboardLayout({ children, allowedRoles }: DashboardLayoutProps
   // If roles are specified and user doesn't have it, redirect
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
     return <Navigate to="/" replace />;
+  }
+
+  // Force onboarding for superadmin if not completed
+  if (user && user.role === 'superadmin' && user.onboarding_completed === 'false') {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  // If user is on root path ('/') and is admin/superadmin who finished onboarding, send to /admin
+  const location = useLocation();
+  if (location.pathname === '/' && user && (user.role === 'superadmin' || user.role === 'admin')) {
+    return <Navigate to="/admin" replace />;
   }
 
   return (
