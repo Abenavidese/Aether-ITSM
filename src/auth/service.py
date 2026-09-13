@@ -13,12 +13,14 @@ def create_tenant_and_user(db: Session, user: UserCreate) -> models.User:
     if db_user:
         raise EmailAlreadyRegistered(user.email)
         
+    import secrets
     # Create Company
     db_company = models.Company(
         name=user.company_name,
         company_size=user.company_size,
         industry=user.industry,
-        current_tool=user.current_tool
+        current_tool=user.current_tool,
+        api_key=secrets.token_urlsafe(32)
     )
     db.add(db_company)
     db.flush() # Get company ID without committing transaction
@@ -31,7 +33,7 @@ def create_tenant_and_user(db: Session, user: UserCreate) -> models.User:
         job_title=user.job_title,
         primary_goal=user.primary_goal,
         password_hash=hashed_pwd,
-        role=user.role,
+        role="admin",
         company_id=db_company.id
     )
     db.add(db_user)

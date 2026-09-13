@@ -111,7 +111,7 @@ export function useRegisterForm(): UseRegisterFormReturn {
 
       const registerRes = await fetch(`${config.API_BASE_URL}/auth/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
@@ -123,7 +123,7 @@ export function useRegisterForm(): UseRegisterFormReturn {
       // Auto-Login
       const loginRes = await fetch(`${config.API_BASE_URL}/auth/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, password: form.password }),
       });
 

@@ -1,6 +1,12 @@
 import { ShieldAlert, Zap, Clock } from "lucide-react";
 
-export function MetricsBar() {
+interface MetricsBarProps {
+  autoDeflectionRate: number;
+  timeSavedHours: number;
+  pendingHuman: number;
+}
+
+export function MetricsBar({ autoDeflectionRate, timeSavedHours, pendingHuman }: MetricsBarProps) {
   return (
     <div className="flex w-full gap-4 mb-6">
       <div className="flex-1 bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-xl p-4 flex items-center gap-4 shadow-lg">
@@ -9,7 +15,7 @@ export function MetricsBar() {
         </div>
         <div>
           <p className="text-slate-400 text-sm font-medium">Auto-Deflection Rate</p>
-          <p className="text-2xl font-bold text-slate-100">82.4%</p>
+          <p className="text-2xl font-bold text-slate-100">{autoDeflectionRate}%</p>
         </div>
       </div>
 
@@ -19,7 +25,7 @@ export function MetricsBar() {
         </div>
         <div>
           <p className="text-slate-400 text-sm font-medium">Est. Human Time Saved</p>
-          <p className="text-2xl font-bold text-slate-100">142 hrs</p>
+          <p className="text-2xl font-bold text-slate-100">{timeSavedHours} hrs</p>
         </div>
       </div>
 
@@ -29,7 +35,7 @@ export function MetricsBar() {
         </div>
         <div>
           <p className="text-slate-400 text-sm font-medium">Pending Human Reviews</p>
-          <p className="text-2xl font-bold text-slate-100">1</p>
+          <p className="text-2xl font-bold text-slate-100">{pendingHuman}</p>
         </div>
       </div>
     </div>

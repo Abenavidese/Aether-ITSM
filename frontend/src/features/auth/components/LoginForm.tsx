@@ -21,6 +21,7 @@ export function LoginForm() {
       const response = await fetch(`${config.API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password })
       });
 
@@ -28,8 +29,8 @@ export function LoginForm() {
         throw new Error('Invalid credentials');
       }
 
-      const data = await response.json();
-      login(data.access_token);
+      await response.json();
+      login();
     } catch (err: any) {
       setError(err.message || 'Failed to login');
     } finally {

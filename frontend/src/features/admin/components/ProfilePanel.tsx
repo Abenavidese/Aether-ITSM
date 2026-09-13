@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { User, Building2, BrainCircuit, Edit2, Save } from 'lucide-react';
+import { User, Building2, BrainCircuit } from 'lucide-react';
 import { config } from '../../../config';
-import { useAuth } from '../../../context/AuthContext';
 
 export function ProfilePanel() {
-  const { token } = useAuth();
+  
   const [settings, setSettings] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ 
@@ -16,7 +15,7 @@ export function ProfilePanel() {
   const fetchSettings = async () => {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': "" }
       });
       if (res.ok) {
         const data = await res.json();
@@ -34,14 +33,14 @@ export function ProfilePanel() {
 
   useEffect(() => {
     fetchSettings();
-  }, [token]);
+  }, []);
 
   const handleSaveSettings = async () => {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
         method: 'PUT',
         headers: { 
-          'Authorization': `Bearer ${token}`,
+          'Authorization': "",
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(editForm)

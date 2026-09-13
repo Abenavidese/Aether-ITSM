@@ -5,20 +5,22 @@ import { LayoutDashboard, MessageSquare, LogOut, Settings } from 'lucide-react';
 
 function Navigation() {
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
 
   return (
     <nav className="fixed top-0 left-0 h-screen w-16 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-8 z-50">
       <div className="flex flex-col gap-8 flex-1">
-        <Link to="/" className={`p-3 rounded-xl transition-all ${location.pathname === '/' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`} title="Employee Chat">
-          <MessageSquare size={24} />
-        </Link>
-        <Link to="/admin" className={`p-3 rounded-xl transition-all ${location.pathname === '/admin' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`} title="IT Admin">
+        <Link to="/admin" className={`p-3 rounded-xl transition-all ${location.pathname === '/admin' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`} title="IT Command Center">
           <LayoutDashboard size={24} />
         </Link>
-        <Link to="/admin/settings" className={`p-3 rounded-xl transition-all ${location.pathname.includes('/settings') ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`} title="Settings">
-          <Settings size={24} />
+        <Link to="/chat" className={`p-3 rounded-xl transition-all ${location.pathname === '/chat' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`} title="Employee Chat">
+          <MessageSquare size={24} />
         </Link>
+        {user && (user.role === 'admin' || user.role === 'superadmin') && (
+          <Link to="/admin/settings" className={`p-3 rounded-xl transition-all ${location.pathname.includes('/settings') ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`} title="Settings">
+            <Settings size={24} />
+          </Link>
+        )}
       </div>
       <button onClick={logout} className="p-3 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-xl transition-all" title="Logout">
         <LogOut size={24} />
@@ -33,9 +35,10 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children, allowedRoles }: DashboardLayoutProps) {
-  const { token, user } = useAuth();
+  const { user, loading } = useAuth();
 
-  if (!token) return <Navigate to="/login" replace />;
+  if (loading) return <div className="p-8 text-center text-slate-500 animate-pulse">Loading...</div>;
+  if (!user) return <Navigate to="/login" replace />;
 
   // If roles are specified and user doesn't have it, redirect
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
@@ -45,12 +48,6 @@ export function DashboardLayout({ children, allowedRoles }: DashboardLayoutProps
   // Force onboarding for superadmin if not completed
   if (user && user.role === 'superadmin' && user.onboarding_completed === 'false') {
     return <Navigate to="/onboarding" replace />;
-  }
-
-  // If user is on root path ('/') and is admin/superadmin who finished onboarding, send to /admin
-  const location = useLocation();
-  if (location.pathname === '/' && user && (user.role === 'superadmin' || user.role === 'admin')) {
-    return <Navigate to="/admin" replace />;
   }
 
   return (

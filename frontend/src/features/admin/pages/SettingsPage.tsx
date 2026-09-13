@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { User, Link2 } from 'lucide-react';
 import { IntegrationPanel } from '../components/IntegrationPanel';
 import { ProfilePanel } from '../components/ProfilePanel';
+import { TeamManagementPanel } from '../components/TeamManagementPanel';
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<'profile' | 'connections'>('connections');
+  const [activeTab, setActiveTab] = useState<'profile' | 'connections' | 'team'>('team');
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -19,7 +20,14 @@ export function SettingsPage() {
           >
             <User size={18} /> Profile Configurations
           </button>
-          <button 
+          <button
+            onClick={() => setActiveTab('team')}
+            className={`flex items-center gap-2 px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === 'team' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-700'}`}
+          >
+            <User size={18} />
+            Team Management
+          </button>
+          <button
             onClick={() => setActiveTab('connections')}
             className={`flex items-center gap-2 pb-2 px-1 border-b-2 font-medium transition-colors ${activeTab === 'connections' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
           >
@@ -30,6 +38,8 @@ export function SettingsPage() {
 
       {activeTab === 'profile' ? (
         <ProfilePanel />
+      ) : activeTab === 'team' ? (
+        <TeamManagementPanel />
       ) : (
         <IntegrationPanel />
       )}

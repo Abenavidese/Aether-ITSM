@@ -1,8 +1,12 @@
 import logging
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends, Header
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 from src.agent.graph import get_workflow
+from src.db.database import get_db
+from src.db.models import Company, User
+from src.security.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -48,11 +52,21 @@ async def run_agent_background(payload: TicketPayload, checkpointer):
         logger.error("Failed executing graph: %s", e, exc_info=True)
 
 @router.post("/webhook/ticket", status_code=202)
-async def receive_ticket_webhook(payload: TicketPayload, background_tasks: BackgroundTasks, request: Request):
+async def receive_ticket_webhook(
+    payload: TicketPayload, 
+    background_tasks: BackgroundTasks, 
+    request: Request,
+    x_api_key: str = Header(...),
+    db: Session = Depends(get_db)
+):
     """
     Receives a ticket from ITSM.
     Uses FastAPI BackgroundTasks which will schedule our async function in the event loop.
     """
+    company = db.query(Company).filter(Company.api_key == x_api_key).first()
+    if not company:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+        
     checkpointer = request.app.state.checkpointer
     background_tasks.add_task(run_agent_background, payload, checkpointer)
     
@@ -63,10 +77,18 @@ async def receive_ticket_webhook(payload: TicketPayload, background_tasks: Backg
     }
 
 @router.post("/approve/{thread_id}")
-async def approve_ticket(thread_id: str, payload: ApprovalPayload, request: Request):
+async def approve_ticket(
+    thread_id: str, 
+    payload: ApprovalPayload, 
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
     """
     Endpoint for IT Agents to approve a Risk Level 3 ticket.
     """
+    if current_user.role not in ["superadmin", "admin", "employee"]:
+        raise HTTPException(status_code=403, detail="Not authorized.")
+        
     config = {"configurable": {"thread_id": thread_id}}
     checkpointer = request.app.state.checkpointer
     

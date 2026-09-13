@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = Field(..., description="Secret key for signing JWT tokens")
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24 hours
+    superadmin_password: str = Field(..., description="Password for the initial superadmin account")
 
     # ── Database ──
     database_url: str = Field(

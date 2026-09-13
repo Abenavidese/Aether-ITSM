@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { KeyRound, Webhook, Link2, Copy, CheckCircle2, GitBranch, Loader2 } from 'lucide-react';
 import { config } from '../../../config';
-import { useAuth } from '../../../context/AuthContext';
 
 export function IntegrationPanel() {
-  const { token } = useAuth();
+  
   const [settings, setSettings] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [testLoading, setTestLoading] = useState(false);
@@ -15,7 +14,7 @@ export function IntegrationPanel() {
   const fetchSettings = async () => {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': "" }
       });
       if (res.ok) {
         const data = await res.json();
@@ -42,7 +41,7 @@ export function IntegrationPanel() {
 
   useEffect(() => {
     fetchSettings();
-  }, [token]);
+  }, []);
 
   const handleCopy = () => {
     if (settings?.api_key) {
@@ -57,7 +56,7 @@ export function IntegrationPanel() {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
         method: 'PUT',
         headers: { 
-          'Authorization': `Bearer ${token}`,
+          'Authorization': "",
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -79,7 +78,7 @@ export function IntegrationPanel() {
     setTestResult(null);
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/test-github`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': "" }
       });
       const data = await res.json();
       if (res.ok) {

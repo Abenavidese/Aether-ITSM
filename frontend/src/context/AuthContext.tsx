@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { config } from '../config';
 
 interface User {
   sub: string;
@@ -11,68 +12,60 @@ interface User {
 }
 
 interface AuthContextType {
-  token: string | null;
   user: User | null;
-  login: (token: string) => void;
-  logout: () => void;
+  loading: boolean;
+  login: () => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  
-  const [user, setUser] = useState<User | null>(() => {
-    const t = localStorage.getItem('token');
-    if (!t) return null;
-    try {
-      const base64Url = t.split('.')[1];
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
-          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-      }).join(''));
-      return JSON.parse(jsonPayload);
-    } catch (e) {
-      console.error("Invalid token on load", e);
-      return null;
-    }
-  });
-  
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  // We no longer need the useEffect for initial load, but we keep it to sync token removals
-  useEffect(() => {
-    if (!token) setUser(null);
-  }, [token]);
-
-  const login = (newToken: string) => {
-    localStorage.setItem('token', newToken);
-    setToken(newToken);
-    
-    // Decode and set user immediately on login
+  const fetchMe = async () => {
     try {
-      const base64Url = newToken.split('.')[1];
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
-          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-      }).join(''));
-      setUser(JSON.parse(jsonPayload));
+      const res = await fetch(`${config.API_BASE_URL}/auth/me`, {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        setUser(await res.json());
+      } else {
+        setUser(null);
+      }
     } catch (e) {
-      console.error("Invalid token", e);
+      setUser(null);
+    } finally {
+      setLoading(false);
     }
-    
+  };
+
+  useEffect(() => {
+    fetchMe();
+  }, []);
+
+  const login = async () => {
+    await fetchMe();
     navigate('/');
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
-    setToken(null);
+  const logout = async () => {
+    try {
+      await fetch(`${config.API_BASE_URL}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (e) {
+      console.error(e);
+    }
     setUser(null);
     navigate('/login');
   };
 
   return (
-    <AuthContext.Provider value={{ token, user, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

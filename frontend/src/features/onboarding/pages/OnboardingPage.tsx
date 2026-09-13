@@ -14,22 +14,18 @@ export function OnboardingPage() {
   const [githubUser, setGithubUser] = useState('');
   const [githubRepoName, setGithubRepoName] = useState('');
 
-  const { token, login } = useAuth(); // We might need to refresh token to update onboarding_completed
+  const { login } = useAuth(); // We might need to refresh token to update onboarding_completed
   const navigate = useNavigate();
 
-  const generateApiKey = () => {
-    // In a real app this comes from backend, for UX we simulate it appearing
-    setApiKey('aeth_live_' + Math.random().toString(36).substr(2, 24));
-  };
-
+  
   const handleComplete = async () => {
     setLoading(true);
     try {
       const response = await fetch(`${config.API_BASE_URL}/tenant/onboarding`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           llm_engine: llmEngine,
@@ -40,10 +36,10 @@ export function OnboardingPage() {
 
       if (!response.ok) throw new Error("Failed to save configuration");
       
-      const data = await response.json();
+      await response.json();
       
       // Refresh token so the new onboarding_completed status is updated
-      login(data.access_token);
+      login();
       navigate('/admin');
     } catch (err) {
       console.error(err);

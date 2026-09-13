@@ -30,7 +30,7 @@ class UserCreate(BaseModel):
     industry: str | None = Field(default=None, max_length=100)
     current_tool: str | None = Field(default=None, max_length=100)
     
-    role: str = Field(default="superadmin", pattern=r"^(superadmin|user)$")
+    role: str = Field(default="admin", pattern=r"^(superadmin|admin|employee)$")
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
