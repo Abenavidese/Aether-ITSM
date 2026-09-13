@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24 hours
     superadmin_password: str = Field(..., description="Password for the initial superadmin account")
+    encryption_key: str = Field(..., description="Secret key for encrypting integration tokens")
 
     # ── Database ──
     database_url: str = Field(

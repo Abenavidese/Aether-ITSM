@@ -39,8 +39,7 @@ export function OnboardingPage() {
       await response.json();
       
       // Refresh token so the new onboarding_completed status is updated
-      login();
-      navigate('/admin');
+      login('/admin');
     } catch (err) {
       console.error(err);
       // Fallback

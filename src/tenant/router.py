@@ -111,10 +111,10 @@ def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends
     
     return {"status": "success", "message": "Settings updated"}
 
-import requests
+import httpx
 
 @router.get("/test-github")
-def test_github_connection(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def test_github_connection(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     print(f"--- TESTING GITHUB CONNECTION FOR USER {current_user.email} ---")
     if current_user.role not in ["superadmin", "admin"]:
         print("Error: User is not an admin.")
@@ -144,8 +144,9 @@ def test_github_connection(db: Session = Depends(get_db), current_user: User = D
     url = f"https://api.github.com/repos/{company.github_repo}"
     print(f"Sending GET request to: {url}")
     
-    # Try fetching the repo
-    response = requests.get(url, headers=headers)
+    # Try fetching the repo asynchronously
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers)
     
     print(f"GitHub API Response Status: {response.status_code}")
     

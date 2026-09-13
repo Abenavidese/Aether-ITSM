@@ -5,15 +5,10 @@ from src.config import get_settings
 
 def _get_fernet() -> Fernet:
     """
-    Derives a 32-byte url-safe base64 key from the JWT secret key
-    using SHA-256, and returns a Fernet instance.
+    Returns a Fernet instance using the application's encryption key.
     """
-    secret = get_settings().jwt_secret_key.encode('utf-8')
-    # Hash it to get exactly 32 bytes
-    digest = hashlib.sha256(secret).digest()
-    # Convert to base64 url-safe format as required by Fernet
-    fernet_key = base64.urlsafe_b64encode(digest)
-    return Fernet(fernet_key)
+    key = get_settings().encryption_key.encode('utf-8')
+    return Fernet(key)
 
 def encrypt_token(token: str | None) -> str | None:
     """Encrypts a plaintext token for storage."""

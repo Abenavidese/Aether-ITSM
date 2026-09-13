@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -81,12 +81,21 @@ async def lifespan(app: FastAPI):
         yield
     logger.info("Shutting down AsyncSqliteSaver")
 
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from src.security.limiter import limiter
+
 app = FastAPI(
     title="ITSM Agent API",
     description="API for the AI-powered IT Support Agent using Nebius Token Factory",
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Configure rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, lambda req, exc: Response(content="Rate limit exceeded", status_code=429))
+app.add_middleware(SlowAPIMiddleware)
 
 # Configure CORS for frontend access
 app.add_middleware(

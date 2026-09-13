@@ -14,7 +14,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: () => Promise<void>;
+  login: (redirectPath?: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -46,9 +46,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchMe();
   }, []);
 
-  const login = async () => {
+  const login = async (redirectPath?: string) => {
     await fetchMe();
-    navigate('/');
+    navigate(redirectPath || '/');
   };
 
   const logout = async () => {
