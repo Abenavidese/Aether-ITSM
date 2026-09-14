@@ -18,6 +18,11 @@ class ExecutionPlanResult(BaseModel):
     resolution_summary: str = Field(description="A brief summary of what the agent decided or did.")
     proposed_plan: Optional[str] = Field(default=None, description="The human-readable plan proposed for Risk Level 3 tickets.")
 
+class PolicyCheckResult(BaseModel):
+    """Output schema for the Compliance/Policy Agent."""
+    is_compliant: bool = Field(description="True if the user's request complies with company policy.")
+    reason: str = Field(description="Explanation of why the request is compliant or not.")
+
 
 # ---------------------------------------------------------
 # LangGraph Agent State
@@ -40,3 +45,8 @@ class AgentState(TypedDict):
     human_approved: bool
     final_resolution: Optional[str]
     technical_error: bool
+    
+    # Swarm/Hierarchical Routing Fields
+    next_agent: Optional[str]
+    compliance_passed: Optional[bool]
+    compliance_notes: Optional[str]

@@ -41,7 +41,7 @@ def login(request: Request, user_credentials: schemas.UserLogin, response: Respo
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True, 
+        secure=False, # Must be false for http://localhost development
         samesite="lax",
         max_age=24 * 60 * 60 # 24 hours
     )
@@ -50,7 +50,7 @@ def login(request: Request, user_credentials: schemas.UserLogin, response: Respo
 
 @router.post("/logout")
 def logout(response: Response):
-    response.delete_cookie("access_token", secure=True, samesite="lax")
+    response.delete_cookie("access_token", secure=False, samesite="lax")
     return {"status": "success", "message": "Logged out successfully"}
 
 @router.get("/me")

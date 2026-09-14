@@ -14,7 +14,7 @@ export function AdminDashboardPage() {
   const fetchDashboard = async () => {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/dashboard`, {
-        headers: { 'Authorization': "" }
+        credentials: 'include'
       });
       if (res.ok) {
         setDashboardData(await res.json());
@@ -26,8 +26,8 @@ export function AdminDashboardPage() {
 
   useEffect(() => {
     fetchDashboard();
-    // Auto refresh every 10 seconds
-    const interval = setInterval(fetchDashboard, 10000);
+    // Auto refresh every 30 seconds
+    const interval = setInterval(fetchDashboard, 30000);
     return () => clearInterval(interval);
   }, []);
 

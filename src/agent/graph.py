@@ -1,46 +1,59 @@
 from langgraph.graph import StateGraph, START, END
 from .state import AgentState
-from .nodes import classify_node, execute_tools_node, draft_plan_node, escalate_node
+from .nodes import supervisor_node, policy_agent_node, execution_agent_node, draft_plan_node, escalate_node
 
-def route_ticket(state: AgentState) -> str:
-    """Conditional Edge logic based on Risk Level."""
-    risk = state.get("assessed_risk", 4)
-    
+def route_from_supervisor(state: AgentState) -> str:
+    """Conditional Edge logic routing from Supervisor to specific sub-agents."""
     if state.get("technical_error"):
         return "escalate"
-    if risk <= 2:
-        return "execute"
-    elif risk == 3:
-        return "draft_plan"
-    else:
+    
+    return state.get("next_agent", "escalate")
+
+def route_from_policy(state: AgentState) -> str:
+    """Conditional Edge logic routing from Policy Agent to resolution."""
+    if state.get("technical_error"):
         return "escalate"
+        
+    return state.get("next_agent", "escalate")
 
 def get_workflow() -> StateGraph:
-    """Builds and returns the uncompiled StateGraph for Aether ITSM."""
+    """Builds and returns the uncompiled StateGraph for Aether ITSM Multi-Agent Swarm."""
     workflow = StateGraph(AgentState)
     
-    # Add Async Nodes
-    workflow.add_node("classify", classify_node)
-    workflow.add_node("execute_tools", execute_tools_node)
+    # Add Async Swarm Nodes
+    workflow.add_node("supervisor", supervisor_node)
+    workflow.add_node("policy", policy_agent_node)
+    workflow.add_node("execution", execution_agent_node)
     workflow.add_node("draft_plan", draft_plan_node)
     workflow.add_node("escalate", escalate_node)
     
-    # Add Edges
-    workflow.add_edge(START, "classify")
+    # START -> Supervisor
+    workflow.add_edge(START, "supervisor")
     
-    # Add Conditional Edges
+    # Routing from Supervisor
     workflow.add_conditional_edges(
-        "classify",
-        route_ticket,
+        "supervisor",
+        route_from_supervisor,
         {
-            "execute": "execute_tools",
+            "execution": "execution",
+            "policy": "policy",
+            "escalate": "escalate"
+        }
+    )
+    
+    # Routing from Policy Agent
+    workflow.add_conditional_edges(
+        "policy",
+        route_from_policy,
+        {
+            "execution": "execution",
             "draft_plan": "draft_plan",
             "escalate": "escalate"
         }
     )
     
     # Terminal nodes
-    workflow.add_edge("execute_tools", END)
+    workflow.add_edge("execution", END)
     workflow.add_edge("draft_plan", END)
     workflow.add_edge("escalate", END)
     

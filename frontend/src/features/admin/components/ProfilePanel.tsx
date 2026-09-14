@@ -15,7 +15,7 @@ export function ProfilePanel() {
   const fetchSettings = async () => {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
-        headers: { 'Authorization': "" }
+        credentials: 'include'
       });
       if (res.ok) {
         const data = await res.json();
@@ -40,8 +40,7 @@ export function ProfilePanel() {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
         method: 'PUT',
         headers: { 
-          'Authorization': "",
-          'Content-Type': 'application/json'
+                    'Content-Type': 'application/json'
         },
         body: JSON.stringify(editForm)
       });

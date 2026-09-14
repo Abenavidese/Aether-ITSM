@@ -20,7 +20,7 @@ export function TeamManagementPanel() {
   const fetchUsers = async () => {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/users`, {
-        headers: { 'Authorization': "" }
+        credentials: 'include'
       });
       if (res.ok) {
         setUsers(await res.json());
@@ -42,8 +42,8 @@ export function TeamManagementPanel() {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/users`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 
-          'Authorization': "",
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(newUser)
@@ -67,7 +67,7 @@ export function TeamManagementPanel() {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/users/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': "" }
+        credentials: 'include'
       });
       if (res.ok) fetchUsers();
       else {

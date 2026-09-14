@@ -14,7 +14,7 @@ export function IntegrationPanel() {
   const fetchSettings = async () => {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
-        headers: { 'Authorization': "" }
+        credentials: 'include'
       });
       if (res.ok) {
         const data = await res.json();
@@ -56,8 +56,7 @@ export function IntegrationPanel() {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
         method: 'PUT',
         headers: { 
-          'Authorization': "",
-          'Content-Type': 'application/json'
+                    'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           github_token: editForm.github_token,
@@ -78,7 +77,7 @@ export function IntegrationPanel() {
     setTestResult(null);
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/test-github`, {
-        headers: { 'Authorization': "" }
+        credentials: 'include'
       });
       const data = await res.json();
       if (res.ok) {
