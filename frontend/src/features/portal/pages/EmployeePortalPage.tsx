@@ -4,7 +4,7 @@ import { ChatInput } from '../components/ChatInput';
 import { useChat } from '../hooks/useChat';
 
 export function EmployeePortalPage() {
-  const { input, setInput, messages, messagesEndRef, handleSubmit } = useChat();
+  const { input, setInput, image, setImage, messages, messagesEndRef, handleSubmit } = useChat();
 
   return (
     <div className="max-w-3xl mx-auto h-[85vh] flex flex-col bg-slate-900 border border-slate-700/50 rounded-2xl shadow-2xl overflow-hidden relative">
@@ -29,7 +29,13 @@ export function EmployeePortalPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      <ChatInput value={input} onChange={setInput} onSubmit={handleSubmit} />
+      <ChatInput 
+        value={input} 
+        image={image}
+        onChange={setInput} 
+        onImageChange={setImage}
+        onSubmit={handleSubmit} 
+      />
     </div>
   );
 }

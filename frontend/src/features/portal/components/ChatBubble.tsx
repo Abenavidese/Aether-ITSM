@@ -5,6 +5,7 @@ interface Message {
   id: string;
   sender: 'user' | 'agent';
   text: string;
+  image_url?: string;
   isThinking?: boolean;
 }
 
@@ -22,11 +23,14 @@ export function ChatBubble({ message }: ChatBubbleProps) {
         </div>
       )}
       
-      <div className={`px-5 py-3 rounded-2xl max-w-[80%] ${
+      <div className={`px-5 py-3 rounded-2xl max-w-[80%] flex flex-col gap-2 ${
         message.sender === 'user' 
           ? 'bg-indigo-600 text-white rounded-tr-sm shadow-lg' 
           : 'bg-slate-800 text-slate-200 rounded-tl-sm border border-slate-700 shadow-lg'
       }`}>
+        {message.image_url && (
+          <img src={message.image_url} alt="Uploaded attachment" className="rounded-lg max-h-48 object-contain" />
+        )}
         {message.isThinking ? (
           <TypingIndicator />
         ) : (

@@ -51,6 +51,25 @@ def ingest_file(tenant_id: str, file_path: str, filename: str, source_type: str 
     vector_store = get_vector_store()
     vector_store.add_documents(splits)
     
+def ingest_text(tenant_id: str, text: str, source_id: str, source_type: str = "ai_feedback"):
+    """Chunks and stores raw text directly into the vector database (e.g. for feedback)."""
+    doc = Document(page_content=text)
+    
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50,
+        separators=["\n\n", "\n", ".", " ", ""]
+    )
+    splits = text_splitter.split_documents([doc])
+    
+    for split in splits:
+        split.metadata["tenant_id"] = tenant_id
+        split.metadata["filename"] = f"Feedback_{source_id}"
+        split.metadata["source_type"] = source_type
+        
+    vector_store = get_vector_store()
+    vector_store.add_documents(splits)
+    
 def retrieve_context(tenant_id: str, query: str, source_type: str = "company_policy", top_k: int = 4) -> str:
     """Retrieves relevant chunks strictly filtered by tenant_id and source_type."""
     vector_store = get_vector_store()

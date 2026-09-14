@@ -3,6 +3,7 @@ import type { Message } from '../components/ChatBubble';
 
 export function useChat() {
   const [input, setInput] = useState("");
+  const [image, setImage] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     { id: '1', sender: 'agent', text: "Hello! I'm Aether, your IT Concierge. How can I help you today?" }
   ]);
@@ -18,11 +19,18 @@ export function useChat() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() && !image) return;
 
-    const userMessage: Message = { id: Date.now().toString(), sender: 'user', text: input };
+    const userMessage: Message = { 
+      id: Date.now().toString(), 
+      sender: 'user', 
+      text: input || "Sent an attachment.", 
+      image_url: image || undefined
+    };
+    
     setMessages(prev => [...prev, userMessage]);
     setInput("");
+    setImage(null);
 
     // Simulate Agent Thinking
     const thinkingId = (Date.now() + 1).toString();
@@ -47,6 +55,8 @@ export function useChat() {
   return {
     input,
     setInput,
+    image,
+    setImage,
     messages,
     messagesEndRef,
     handleSubmit,

@@ -110,10 +110,12 @@ async def execution_agent_node(state: AgentState) -> dict:
     tenant_id = state.get("user_context", {}).get("tenant_id")
     
     rag_context = ""
+    ai_feedback = ""
     if tenant_id and user_query:
         # Execution agent queries technical docs (or company policy if risk 0)
         source = "company_policy" if state.get('assessed_risk') == 0 else "technical_repo"
         rag_context = retrieve_context(tenant_id, user_query, source_type=source)
+        ai_feedback = retrieve_context(tenant_id, user_query, source_type="ai_feedback", top_k=2)
         
     prompt = f"""
     You are the Execution Agent. 
@@ -123,6 +125,9 @@ async def execution_agent_node(state: AgentState) -> dict:
     
     Knowledge Base Context:
     {rag_context if rag_context else "No specific context found."}
+    
+    Previous Admin Feedback on similar issues (LEARN FROM THIS):
+    {ai_feedback if ai_feedback else "No previous feedback found."}
     """
     messages = [SystemMessage(content=prompt)] + state["messages"]
     

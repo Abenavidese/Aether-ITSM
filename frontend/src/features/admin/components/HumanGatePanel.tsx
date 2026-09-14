@@ -1,13 +1,19 @@
-import { Check, X } from 'lucide-react';
+import { useState } from 'react';
+import { Check, X, BrainCircuit } from 'lucide-react';
 import type { Ticket } from '../hooks/useSimulation';
 
 interface HumanGatePanelProps {
   tickets: Ticket[];
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, feedback?: string) => void;
 }
 
 export function HumanGatePanel({ tickets, onApprove }: HumanGatePanelProps) {
   const pausedTickets = tickets.filter(t => t.status === 'paused');
+  const [feedback, setFeedback] = useState<Record<string, string>>({});
+
+  const handleFeedbackChange = (id: string, value: string) => {
+    setFeedback(prev => ({ ...prev, [id]: value }));
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -34,6 +40,16 @@ export function HumanGatePanel({ tickets, onApprove }: HumanGatePanelProps) {
             3. Notify user via email
           </div>
 
+          <div className="mb-4">
+            <input 
+              type="text" 
+              placeholder="Why reject? (Teaches the AI for next time)" 
+              value={feedback[t.id] || ''}
+              onChange={(e) => handleFeedbackChange(t.id, e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs text-slate-300 placeholder-slate-600 focus:border-amber-500/50 outline-none"
+            />
+          </div>
+
           <div className="flex gap-2">
             <button 
               onClick={() => onApprove(t.id, true)}
@@ -42,10 +58,10 @@ export function HumanGatePanel({ tickets, onApprove }: HumanGatePanelProps) {
               <Check size={16} /> Approve
             </button>
             <button 
-              onClick={() => onApprove(t.id, false)}
+              onClick={() => onApprove(t.id, false, feedback[t.id])}
               className="flex-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 py-2 rounded-lg flex items-center justify-center gap-1 text-sm font-medium transition-colors"
             >
-              <X size={16} /> Reject
+              <BrainCircuit size={16} /> {feedback[t.id] ? 'Teach & Reject' : 'Reject'}
             </button>
           </div>
         </div>

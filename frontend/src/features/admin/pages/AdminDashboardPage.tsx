@@ -31,9 +31,27 @@ export function AdminDashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const approveTicket = (ticketId: string, approved: boolean) => {
-    console.log(`Ticket ${ticketId} human review: ${approved}`);
-    // In Phase 2, this will send a real POST request to resolve/escalate the ticket
+  const approveTicket = async (ticketId: string, approved: boolean, feedback?: string) => {
+    console.log(`Ticket ${ticketId} human review: ${approved}, feedback: ${feedback}`);
+    
+    if (feedback && !approved) {
+      try {
+        await fetch(`${config.API_BASE_URL}/tenant/knowledge/feedback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            ticket_id: ticketId,
+            feedback_text: feedback
+          })
+        });
+        alert('Feedback saved to AI Memory.');
+      } catch (err) {
+        console.error('Failed to save AI feedback', err);
+      }
+    }
+    
+    // In Phase 2, this will also send a real POST request to resolve/escalate the ticket status
   };
 
   return (

@@ -16,6 +16,7 @@ class TicketPayload(BaseModel):
     summary: str
     description: str
     user_id: str
+    image_base64: str | None = None
 
 class ApprovalPayload(BaseModel):
     approved: bool
@@ -25,8 +26,18 @@ async def run_agent_background(payload: TicketPayload, checkpointer):
     """Async background task to execute the LangGraph agent."""
     logger.info("Starting ASYNC agent for ticket %s", payload.ticket_id)
     
+    text_content = f"Title: {payload.summary}\n\nDescription: {payload.description}"
+    
+    if payload.image_base64:
+        content = [
+            {"type": "text", "text": text_content},
+            {"type": "image_url", "image_url": {"url": payload.image_base64}}
+        ]
+    else:
+        content = text_content
+        
     initial_state = {
-        "messages": [HumanMessage(content=f"Title: {payload.summary}\n\nDescription: {payload.description}")],
+        "messages": [HumanMessage(content=content)],
         "ticket_id": payload.ticket_id,
         "user_context": {"email": payload.user_id},
         "assessed_risk": 4, 

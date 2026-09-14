@@ -4,7 +4,13 @@ import shutil
 from typing import List
 from src.security.deps import get_current_user
 from src.db.models import User
-from src.rag.service import ingest_file, get_uploaded_files, delete_file
+from src.rag.service import ingest_file, ingest_text, get_uploaded_files, delete_file
+from pydantic import BaseModel
+import uuid
+
+class FeedbackRequest(BaseModel):
+    ticket_id: str
+    feedback_text: str
 
 router = APIRouter(prefix="/tenant/knowledge", tags=["knowledge"])
 
@@ -46,6 +52,25 @@ async def upload_document(
         # Cleanup temporary file
         if os.path.exists(file_path):
             os.remove(file_path)
+
+@router.post("/feedback")
+def submit_ai_feedback(req: FeedbackRequest, current_user: User = Depends(get_current_user)):
+    """Saves human feedback to the RAG memory to teach the AI."""
+    if current_user.role not in ["admin", "superadmin"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can train AI.")
+        
+    try:
+        # We prepend context to the feedback text
+        contextual_feedback = f"Past correction on ticket {req.ticket_id}: {req.feedback_text}"
+        ingest_text(
+            tenant_id=current_user.company_id,
+            text=contextual_feedback,
+            source_id=req.ticket_id,
+            source_type="ai_feedback"
+        )
+        return {"status": "success", "message": "Feedback ingested into AI memory."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("")
 def list_documents(current_user: User = Depends(get_current_user)):
