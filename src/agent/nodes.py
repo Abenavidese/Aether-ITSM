@@ -6,6 +6,7 @@ from .mcp_client import MCPToolClient
 from .risk_policy import enforce_risk_floor
 from .state import AgentState, ClassificationResult, ExecutionPlanResult, PolicyCheckResult
 from src.config import get_llms
+from src.integrations.monitoring import get_monitored_services
 from src.rag.service import retrieve_context
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,17 @@ async def execution_agent_node(state: AgentState, config: RunnableConfig) -> dic
         else "Formulate a tool call and a resolution summary."
     )
 
+    monitored_services = get_monitored_services(tenant_id) if tenant_id else []
+    services_note = ""
+    if monitored_services:
+        services_list = "\n".join(f"- {s['name']}: {s['url']}" for s in monitored_services)
+        services_note = f"""
+    Monitored services for this tenant (use check_service_status against the
+    matching URL BEFORE assuming a "can't connect / can't log in" report is a
+    user-side problem):
+    {services_list}
+    """
+
     prompt = f"""
     You are the Execution Agent.
     The ticket is Risk Level {state.get('assessed_risk')}.
@@ -195,7 +207,7 @@ async def execution_agent_node(state: AgentState, config: RunnableConfig) -> dic
 
     Previous Admin Feedback on similar issues (LEARN FROM THIS):
     {ai_feedback if ai_feedback else "No previous feedback found."}
-
+    {services_note}
     Available tools (call exactly one if the ticket requires a real action;
     leave tool_name null for a purely informational answer):
     {mcp_client.prompt_catalog()}

@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
-import { KeyRound, Webhook, Link2, Copy, CheckCircle2, GitBranch, Loader2 } from 'lucide-react';
+import { KeyRound, Webhook, Link2, Copy, CheckCircle2, GitBranch, Loader2, Activity, Plus, Trash2 } from 'lucide-react';
 import { config } from '../../../config';
 
+type MonitoredService = { name: string; url: string };
+
 export function IntegrationPanel() {
-  
+
   const [settings, setSettings] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<{status: 'success' | 'error', message: string} | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ github_token: '', github_user: '', github_repo_name: '' });
+  const [services, setServices] = useState<MonitoredService[]>([]);
+  const [isEditingServices, setIsEditingServices] = useState(false);
 
   const fetchSettings = async () => {
     try {
@@ -28,11 +32,12 @@ export function IntegrationPanel() {
           repo = parts[1] || '';
         }
         
-        setEditForm({ 
-          github_token: data.github_token || '', 
+        setEditForm({
+          github_token: data.github_token || '',
           github_user: user,
-          github_repo_name: repo 
+          github_repo_name: repo
         });
+        setServices(data.monitored_services || []);
       }
     } catch (err) {
       console.error(err);
@@ -55,7 +60,8 @@ export function IntegrationPanel() {
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
         method: 'PUT',
-        headers: { 
+        credentials: 'include',
+        headers: {
                     'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -71,6 +77,32 @@ export function IntegrationPanel() {
       console.error(err);
     }
   };
+
+  const handleSaveServices = async () => {
+    try {
+      const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          monitored_services: services.filter(s => s.name.trim() && s.url.trim())
+        })
+      });
+      if (res.ok) {
+        setIsEditingServices(false);
+        fetchSettings();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const updateService = (index: number, field: keyof MonitoredService, value: string) => {
+    setServices(prev => prev.map((s, i) => i === index ? { ...s, [field]: value } : s));
+  };
+
+  const addService = () => setServices(prev => [...prev, { name: '', url: '' }]);
+  const removeService = (index: number) => setServices(prev => prev.filter((_, i) => i !== index));
 
   const handleTestConnection = async () => {
     setTestLoading(true);
@@ -211,6 +243,61 @@ export function IntegrationPanel() {
               {copied ? <CheckCircle2 size={18} className="text-emerald-400" /> : <Copy size={18} />}
               {copied ? 'Copied' : 'Copy'}
             </button>
+          </div>
+        </div>
+
+        {/* MONITORED SERVICES SECTION */}
+        <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Activity className="text-cyan-400" size={20} />
+              <h3 className="text-lg font-medium text-white">Monitored Services</h3>
+            </div>
+            <button
+              onClick={() => isEditingServices ? handleSaveServices() : setIsEditingServices(true)}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-sm transition-colors flex items-center gap-2"
+            >
+              {isEditingServices ? 'Save' : 'Edit'}
+            </button>
+          </div>
+          <p className="text-sm text-slate-400 mb-6">
+            Services the agent can healthcheck before assuming a "can't connect" report is a user-side issue.
+          </p>
+
+          <div className="space-y-3">
+            {services.length === 0 && !isEditingServices && (
+              <div className="text-sm text-slate-500 italic">No services configured.</div>
+            )}
+            {services.map((s, i) => (
+              <div key={i} className="flex gap-2">
+                <input
+                  type="text"
+                  readOnly={!isEditingServices}
+                  value={s.name}
+                  onChange={(e) => updateService(i, 'name', e.target.value)}
+                  placeholder="Service name"
+                  className="w-1/3 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-300 text-sm focus:outline-none disabled:opacity-80"
+                />
+                <input
+                  type="text"
+                  readOnly={!isEditingServices}
+                  value={s.url}
+                  onChange={(e) => updateService(i, 'url', e.target.value)}
+                  placeholder="https://..."
+                  className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-300 font-mono text-sm focus:outline-none disabled:opacity-80"
+                />
+                {isEditingServices && (
+                  <button onClick={() => removeService(i)} className="text-rose-400 hover:text-rose-300 px-2">
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {isEditingServices && (
+              <button onClick={addService} className="text-cyan-400 hover:text-cyan-300 text-sm flex items-center gap-1 mt-2">
+                <Plus size={16} /> Add service
+              </button>
+            )}
           </div>
         </div>
 

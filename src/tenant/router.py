@@ -1,3 +1,4 @@
+import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
@@ -96,8 +97,13 @@ def get_tenant_settings(db: Session = Depends(get_db), current_user: User = Depe
         "onboarding_completed": company.onboarding_completed == "true",
         "user_full_name": current_user.full_name,
         "user_job_title": current_user.job_title,
-        "company_name": company.name
+        "company_name": company.name,
+        "monitored_services": json.loads(company.monitored_services) if company.monitored_services else []
     }
+
+class MonitoredService(BaseModel):
+    name: str
+    url: str
 
 class UpdateSettingsPayload(BaseModel):
     github_token: Optional[str] = None
@@ -105,6 +111,7 @@ class UpdateSettingsPayload(BaseModel):
     llm_engine: Optional[str] = None
     user_full_name: Optional[str] = None
     company_name: Optional[str] = None
+    monitored_services: Optional[list[MonitoredService]] = None
 
     _validate_repo = field_validator("github_repo")(_validate_github_repo)
 
@@ -128,7 +135,9 @@ def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends
         
     if payload.user_full_name is not None:
         current_user.full_name = payload.user_full_name
-        
+    if payload.monitored_services is not None:
+        company.monitored_services = json.dumps([s.model_dump() for s in payload.monitored_services])
+
     db.commit()
     
     return {"status": "success", "message": "Settings updated"}

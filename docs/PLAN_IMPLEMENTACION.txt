@@ -150,17 +150,20 @@ FASE 4 - TOOL DE ESTADO DE SERVIDOR/SERVICIO
 Independiente de la Fase 3 (no se bloquean entre si), pero depende de
 Fase 2 igual que cualquier tool real.
 
-4.1 [ ] Definir que "servicios" puede consultar el agente: para el demo,
-        una lista simple configurable por tenant (nombre + URL de
-        healthcheck) es suficiente. No hace falta un sistema de monitoreo
-        real todavia.
-4.2 [ ] Tool nueva: check_service_status(service_name) -> healthcheck HTTP
-        real contra la URL configurada, con timeout corto y manejo de
-        caida de red como "no disponible" (no como error tecnico del
-        agente).
-4.3 [ ] Prompt del agente: cuando la descripcion del ticket/mensaje suene
-        a "no puedo conectarme/entrar", debe considerar esta tool antes de
-        asumir que es un problema del lado del usuario.
+4.1 [DONE] Company.monitored_services (JSON [{name,url}]), editable desde
+        Settings > Connections (IntegrationPanel.tsx) via GET/PUT
+        /api/tenant/settings. src/integrations/monitoring.py centraliza la
+        lectura/parseo (usado por nodes.py).
+4.2 [DONE] Tool check_service_status(service_url) en mcp_server.py: GET real
+        con httpx, timeout 5s, y una caida de red se devuelve como
+        {"available": false, "error": ...} (resultado exitoso para el
+        agente, no una excepcion que dispare escalate por error tecnico).
+        Nota: el tool recibe la URL directa (no un nombre a resolver del
+        lado del servidor MCP) para no acoplar el proceso MCP a la DB.
+4.3 [DONE] execution_agent_node inyecta la lista de servicios monitoreados
+        del tenant en el prompt, instruyendo a preferir check_service_status
+        antes de asumir que un "no puedo conectarme" es del lado del
+        usuario.
 
 
 FASE 5 - ENDPOINT DE CHAT SINCRONO
@@ -233,10 +236,20 @@ FASE 8 - DEUDA TECNICA (no bloqueante, pero hay que agendarla)
 No bloquea ninguna fase de arriba, pero sin esto el proyecto no aguanta
 una revision tecnica a fondo ni un escenario de carga real.
 
-8.1 [ ] Arreglar el harness de pytest: hoy 0 tests pasan en Windows porque
-        src/main.py crea el engine de SQLAlchemy a nivel de modulo (import
-        time) y el fixture de test intenta borrar el archivo despues,
-        cosa que Windows no permite con el archivo todavia abierto.
+8.1 [DONE] tests/test_flow.py: engine.dispose() (+ recreate schema) antes de
+        borrar test_app.db en cada test, TestClient entra al lifespan real
+        (`with client:`) para que app.state.checkpointer/mcp_client existan,
+        y test_checkpoints.db solo se limpia una vez por sesion (el
+        AsyncSqliteSaver vive toda la sesion). De paso, el suite estaba
+        pasando por accidente: test_webhook_receives_tickets nunca mandaba
+        x-api-key (422 esperado, no 202) y test_approve_ticket_not_found
+        pegaba sin login (401, no 404 - la Fase 0 ya exigia auth). Se
+        corrigieron con fixtures reales (empresa+usuarios seedeados,
+        register+login) y se mockea run_agent_background en el test de
+        webhook (BackgroundTasks corre sync dentro del request en
+        TestClient - sin esto el test necesitaria Ollama real corriendo,
+        que es el trabajo de scripts/e2e_ollama.py, no de este suite).
+        5 tests, 4.15s, verde.
 8.2 [ ] Decidir si se purga app.db/checkpoints.db del historial de git
         (commits viejos todavia los tienen) o si se acepta el riesgo dado
         que es un proyecto de portafolio/hackathon sin datos reales de

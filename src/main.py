@@ -40,6 +40,7 @@ def _ensure_schema_migrations():
         for statement in (
             "ALTER TABLE companies ADD COLUMN api_key_hash VARCHAR",
             "ALTER TABLE tickets ADD COLUMN external_id VARCHAR",
+            "ALTER TABLE companies ADD COLUMN monitored_services VARCHAR",
         ):
             try:
                 conn.execute(text(statement))

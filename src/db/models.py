@@ -35,6 +35,9 @@ class Company(Base):
     mcp_server_url = Column(String, nullable=True)
     mcp_auth_token = Column(String, nullable=True)
     llm_engine = Column(String, default="nemotron-nano")
+    # JSON-encoded list of {"name": str, "url": str} — services the agent can
+    # healthcheck via the check_service_status MCP tool (see src/tools/mcp_server.py).
+    monitored_services = Column(String, nullable=True)
     
     plan_id = Column(String, ForeignKey("subscription_plans.id"), nullable=True)
     
