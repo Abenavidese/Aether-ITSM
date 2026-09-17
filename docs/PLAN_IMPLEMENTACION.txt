@@ -292,3 +292,18 @@ una revision tecnica a fondo ni un escenario de carga real.
         finos (ej. reintentos de structured output no cuentan aparte) -
         revisar si el conteo actual es suficientemente preciso para
         cobrar por plan mas adelante.
+
+
+ESTADO AL CIERRE DE ESTA SESION
+-----------------------------------------------------------
+Fases 0-7 y 8.1 completas y verificadas con ejecucion real (pytest 7/7
+verde, `tsc -b` sin errores nuevos) - no solo lectura de codigo. Nada de
+esto se probo contra Ollama real corriendo (no estaba disponible en esta
+sesion); usar scripts/e2e_ollama.py con Ollama levantado para la
+verificacion end-to-end con modelos reales antes de dar cualquier fase por
+"lista para produccion".
+
+8.2 y 8.3 quedan sin tocar a proposito: son decisiones irreversibles
+(purgar historial de git) o de infraestructura (migrar a Postgres) que
+no se toman sin el dueno del proyecto presente. 8.4/8.5 son ajustes de
+negocio que necesitan datos reales de uso, no bloquean nada.
