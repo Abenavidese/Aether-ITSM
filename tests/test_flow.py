@@ -137,6 +137,68 @@ def test_webhook_rejects_unknown_user(seeded_company):
     response = client.post("/api/webhook/ticket", json=ticket, headers={"x-api-key": api_key})
     assert response.status_code == 404
 
+class _FakeStructuredLLM:
+    """Stands in for llm.with_structured_output(...).ainvoke(...) so chat
+    tests exercise the real HTTP/graph/DB path without a live Ollama."""
+    def __init__(self, result):
+        self._result = result
+
+    def with_structured_output(self, schema, include_raw=True):
+        return self
+
+    async def ainvoke(self, messages):
+        return {"parsed": self._result, "parsing_error": None}
+
+
+def _login_as(email: str, password: str = "irrelevant"):
+    resp = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert resp.status_code == 200, resp.text
+
+
+def test_chat_resolved_in_one_turn(seeded_company, monkeypatch):
+    from src.agent.state import ConciergeResult
+
+    _login_as(load_test_tickets()[0]["user_email"])
+    fake_result = ConciergeResult(response_text="Cleared your VPN session.", resolved=True)
+    monkeypatch.setattr(
+        "src.agent.concierge.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
+    )
+    # RAG needs a real Postgres+pgvector store (see docs/architecture.md) —
+    # out of scope for this sqlite-backed suite; retrieve_context is
+    # exercised for real by scripts/e2e_ollama.py against Supabase.
+    monkeypatch.setattr("src.agent.concierge.retrieve_context", lambda *a, **kw: "")
+
+    response = client.post("/api/chat", json={"message": "my vpn is down"})
+    assert response.status_code == 200
+    assert response.json() == {"reply": "Cleared your VPN session.", "status": "resolved"}
+
+
+def test_chat_escalates_to_ticket(seeded_company, monkeypatch):
+    from src.agent.state import ConciergeResult
+
+    _login_as(load_test_tickets()[1]["user_email"])
+    fake_result = ConciergeResult(response_text="Opening a ticket for you.", resolved=False)
+    monkeypatch.setattr(
+        "src.agent.concierge.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
+    )
+    monkeypatch.setattr("src.agent.concierge.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.api.routes.run_agent_background", lambda *a, **kw: None)
+
+    response = client.post("/api/chat", json={"message": "I need admin access to prod DB"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "investigating"
+    assert body["ticket_external_id"].startswith("chat-")
+
+    db = SessionLocal()
+    try:
+        ticket = db.query(models.Ticket).filter(models.Ticket.external_id == body["ticket_external_id"]).first()
+        assert ticket is not None
+        assert ticket.description == "I need admin access to prod DB"
+    finally:
+        db.close()
+
+
 def test_approve_ticket_not_found():
     # approve_ticket requires an authenticated admin (Fase 0 IDOR fix), so
     # register+login for a real cookie first — an unauthenticated call would

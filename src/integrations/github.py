@@ -30,6 +30,40 @@ async def get_repo_info(repo: str, token: str) -> dict:
     return response.json()
 
 
+async def search_code(repo: str, token: str, query: str, max_results: int = 3) -> list[dict]:
+    """
+    Searches code in `repo` via GitHub's code search API.
+
+    Deliberately NOT exposed as an MCP tool the LLM calls directly (unlike
+    check_service_status/query_knowledge_base) — an MCP tool's declared
+    parameters are shown to the LLM verbatim in its prompt catalog
+    (src/agent/mcp_client.py), which would mean asking the model to supply
+    `repo`/`token` itself. Real per-tenant secrets must never be something
+    an LLM is asked to produce or could hallucinate; the same principle
+    already used for GitHub issue creation on escalation (Fase 3). Callers
+    fetch/decrypt the tenant's token server-side and inject only the
+    `query` text into the agent's context.
+
+    Limitations (Fase 6.3): GitHub's code search API is rate-limited to
+    10 requests/minute per authenticated token, separate from the general
+    API limit — callers must not retry aggressively. A private repo's
+    token needs the `repo` (code read) scope or every search 404s.
+    """
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{GITHUB_API_BASE}/search/code",
+            headers=_headers(token),
+            params={"q": f"{query} repo:{repo}"},
+        )
+
+    if response.status_code != 200:
+        message = response.json().get("message", response.text)
+        raise RuntimeError(f"GitHub code search failed ({response.status_code}): {message}")
+
+    items = response.json().get("items", [])[:max_results]
+    return [{"path": item["path"], "url": item["html_url"]} for item in items]
+
+
 async def create_issue(repo: str, token: str, title: str, body: str) -> str:
     """Creates an issue in `repo` (format 'owner/repo') and returns its HTML URL."""
     async with httpx.AsyncClient() as client:

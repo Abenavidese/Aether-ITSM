@@ -173,25 +173,30 @@ reales para poder responder "el servidor esta caido" o crear un issue en
 el mismo turno) y se beneficia de Fase 3 y 4 ya existiendo, pero puede
 arrancarse con un triage mas simple si se prioriza esto primero.
 
-5.1 [ ] Decidir el modelo de conversacion: un thread_id por conversacion de
-        chat (no por ticket_id de ITSM) - probablemente uno por usuario
-        activo, persistido igual que los threads de ticket via el mismo
-        checkpointer.
-5.2 [ ] Nodo de triage ligero ("Concierge"): intenta responder directo con
-        RAG + las tools de las Fases 3/4 ANTES de escalar al Supervisor
-        pesado de riesgo 0-4. La mayoria de "no me deja entrar" deberian
-        resolverse aca sin generar un Ticket formal.
-5.3 [ ] Definir el criterio de "esto si necesita convertirse en Ticket": si
-        el Concierge no puede resolverlo en 1-2 turnos, ahi si se crea un
-        Ticket real y se sigue el flujo ya existente (Supervisor -> Policy
-        -> Execution/Draft Plan).
-5.4 [ ] Nuevo endpoint POST /api/chat: auth por cookie de sesion normal (el
-        empleado ya logueado), no por x-api-key de webhook. Devuelve la
-        respuesta del turno actual (sincrono esta bien para el MVP;
-        streaming es una mejora posterior, no un requisito).
-5.5 [ ] Historial de conversacion: decidir si vive solo en el checkpointer
-        de LangGraph o si tambien se persiste en SQL para poder mostrarlo
-        en el dashboard de admin.
+5.1 [DONE] thread_id = f"chat:{user.id}" (uno por empleado, no por ticket),
+        persistido en el mismo AsyncSqliteSaver que ya usan los threads de
+        ticket (src/api/routes.py comparte request.app.state.checkpointer).
+5.2 [DONE] src/agent/concierge.py: grafo de un solo nodo (concierge_node).
+        Intenta resolver con RAG (company_policy + technical_repo) y dos
+        tools "seguras" (query_knowledge_base, check_service_status de la
+        Fase 4) antes de escalar. CONCIERGE_ALLOWED_TOOLS es un allow-list
+        deterministico: aunque el LLM alucine otro tool_name, nunca se
+        despacha una accion de riesgo desde el chat.
+5.3 [DONE] ConciergeResult.resolved decide el criterio: false -> se crea un
+        Ticket real (_create_and_dispatch_ticket, compartido con el
+        webhook) y corre el swarm completo Supervisor->Policy->Execution en
+        background; true -> se responde directo, sin Ticket.
+5.4 [DONE] POST /api/chat (src/api/routes.py), auth por cookie de sesion via
+        get_current_user (no x-api-key). Sincrono: espera el turno del
+        Concierge y devuelve {reply, status: resolved|investigating,
+        ticket_external_id?}.
+5.5 [DONE] Decision: historial solo en el checkpointer de LangGraph, sin
+        tabla SQL de transcript aparte, para el MVP.
+        Verificado con pytest real (no solo lectura de codigo): 2 tests
+        nuevos en tests/test_flow.py mockeando el LLM (get_llms) y RAG
+        (retrieve_context necesita Postgres+pgvector real, fuera de alcance
+        de este suite en sqlite) pero ejercitando el path HTTP/grafo/DB
+        real completo, incluyendo la creacion del Ticket de escalamiento.
 
 
 FASE 6 - BUSQUEDA DE CODIGO ON-DEMAND EN GITHUB
@@ -203,14 +208,24 @@ pgvector: el chunking de texto plano no funciona bien para codigo, y un
 indice pre-calculado se desactualiza. Mas simple y mas preciso: una tool
 que busca on-demand cuando el agente la necesita.
 
-6.1 [ ] Tool nueva: search_github_code(repo, token, query) usando la API
-        de busqueda de codigo de GitHub.
-6.2 [ ] Logica/prompt para que el agente decida cuando vale la pena usar
-        esta tool (preguntas que mencionan algo especifico del proyecto,
-        no problemas genericos de "la VPN no conecta").
-6.3 [ ] Documentar limitaciones: rate limits de la API de busqueda de
-        GitHub, y que el token necesita el scope correcto si el repo es
-        privado.
+6.1 [DONE] search_code(repo, token, query) en src/integrations/github.py.
+        DESVIACION DELIBERADA del texto original de este item: NO es una
+        tool MCP que el LLM invoque con tool_name/tool_args. Una tool MCP
+        expone sus parametros declarados tal cual en el prompt (ver
+        mcp_client.prompt_catalog()), lo que hubiera significado pedirle al
+        LLM que "complete" repo/token el mismo, exactamente el problema que
+        Fase 3 ya evito para la creacion de issues. concierge.py obtiene y
+        desencripta el token del tenant server-side y solo la query llega
+        al contexto del LLM.
+6.2 [DONE] Heuristica regex (_CODE_QUESTION_PATTERN en concierge.py) sobre
+        el mensaje del usuario decide cuando vale la pena buscar codigo,
+        antes de la unica llamada al LLM del turno (evita una segunda
+        vuelta de LLM solo para decidir si buscar).
+6.3 [DONE] Limitaciones documentadas en el docstring de search_code(): rate
+        limit de la API de busqueda de codigo de GitHub (10 req/min
+        autenticado) y que el repo privado necesita un token con scope de
+        lectura de codigo - no hay retry/backoff implementado, una falla
+        simplemente omite el contexto de codigo sin bloquear el turno.
 
 
 FASE 7 - FRONTEND: DEJAR DE SIMULAR

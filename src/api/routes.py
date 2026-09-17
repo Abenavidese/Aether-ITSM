@@ -1,9 +1,11 @@
 import logging
+import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
+from src.agent.concierge import get_concierge_workflow
 from src.agent.graph import get_workflow
 from src.db.database import get_db, SessionLocal
 from src.db.models import Company, User, Ticket
@@ -175,6 +177,47 @@ async def run_agent_background(payload: TicketPayload, company_id: str, ticket_i
     finally:
         db.close()
 
+async def _create_and_dispatch_ticket(
+    db: Session, company: Company, user: User, external_id: str, title: str, description: str,
+    background_tasks: BackgroundTasks, checkpointer, mcp_client,
+) -> Ticket:
+    """
+    Persists a new Ticket and dispatches the full agent swarm in the
+    background — shared by the webhook (Fase 0) and the chat Concierge's
+    escalation path (Fase 5) so both funnel every ticket through the same
+    monthly AI-resolution plan limit and the same background execution.
+    Callers own their own monthly TICKET-count limit check beforehand (their
+    error handling differs: the webhook rejects with 402, chat just degrades
+    to a plain reply) — this only owns what happens once a ticket may exist.
+    """
+    ticket = Ticket(
+        tenant_id=company.id, user_id=user.id, external_id=external_id,
+        title=title, description=description, status="open",
+    )
+    db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+
+    plan = company.plan
+    if plan:
+        ai_resolutions_this_month = db.query(Ticket).filter(
+            Ticket.tenant_id == company.id,
+            Ticket.created_at >= _month_start(),
+            Ticket.resolution_path.isnot(None),
+        ).count()
+        if ai_resolutions_this_month >= plan.max_ai_resolutions_per_month:
+            # Ticket is logged, but this plan is out of AI resolutions for the
+            # period — route straight to the human queue instead of invoking
+            # the agent at all.
+            ticket.status = "pending_human"
+            db.commit()
+            return ticket
+
+    payload = TicketPayload(ticket_id=external_id, summary=title, description=description, user_email=user.email)
+    background_tasks.add_task(run_agent_background, payload, company.id, ticket.id, checkpointer, mcp_client)
+    return ticket
+
+
 @router.post("/webhook/ticket", status_code=202)
 @limiter.limit("30/minute")
 async def receive_ticket_webhook(
@@ -242,39 +285,16 @@ async def receive_ticket_webhook(
                 detail=f"Monthly ticket limit reached for your plan ({plan.max_tickets_per_month}).",
             )
 
-    ticket = Ticket(
-        tenant_id=company.id,
-        user_id=user.id,
-        external_id=payload.ticket_id,
-        title=payload.summary,
-        description=payload.description,
-        status="open",
+    ticket = await _create_and_dispatch_ticket(
+        db, company, user, payload.ticket_id, payload.summary, payload.description,
+        background_tasks, request.app.state.checkpointer, request.app.state.mcp_client,
     )
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-
-    if plan:
-        ai_resolutions_this_month = db.query(Ticket).filter(
-            Ticket.tenant_id == company.id,
-            Ticket.created_at >= month_start,
-            Ticket.resolution_path.isnot(None),
-        ).count()
-        if ai_resolutions_this_month >= plan.max_ai_resolutions_per_month:
-            # Ticket is logged, but this plan is out of AI resolutions for the
-            # period — route straight to the human queue instead of invoking
-            # the agent at all.
-            ticket.status = "pending_human"
-            db.commit()
-            return {
-                "status": "Accepted",
-                "message": "Monthly AI resolution limit reached; ticket routed to the human queue.",
-                "ticket_id": payload.ticket_id
-            }
-
-    checkpointer = request.app.state.checkpointer
-    mcp_client = request.app.state.mcp_client
-    background_tasks.add_task(run_agent_background, payload, company.id, ticket.id, checkpointer, mcp_client)
+    if ticket.status == "pending_human":
+        return {
+            "status": "Accepted",
+            "message": "Monthly AI resolution limit reached; ticket routed to the human queue.",
+            "ticket_id": payload.ticket_id
+        }
 
     return {
         "status": "Accepted",
@@ -344,3 +364,62 @@ async def approve_ticket(
     if payload.approved:
         return {"status": "Resumed", "message": "Plan approved and executed."}
     return {"status": "Rejected", "message": "Execution cancelled by human; ticket escalated."}
+
+
+class ChatPayload(BaseModel):
+    message: str
+
+
+@router.post("/chat")
+async def chat(
+    payload: ChatPayload,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Fase 5 — synchronous chat endpoint for the employee portal. Auth is the
+    normal session cookie (the employee is already logged in), not the
+    webhook's x-api-key. One LangGraph thread per employee (not per ticket)
+    so multi-turn context persists across messages; history lives only in
+    the checkpointer (Fase 5.5 decision — no separate SQL transcript table).
+    """
+    thread_id = f"chat:{current_user.id}"
+    config = {"configurable": {"thread_id": thread_id, "mcp_client": request.app.state.mcp_client}}
+    concierge_app = get_concierge_workflow().compile(checkpointer=request.app.state.checkpointer)
+
+    initial_state = {
+        "messages": [HumanMessage(content=payload.message)],
+        "user_context": {"email": current_user.email, "tenant_id": current_user.company_id},
+    }
+    async for _ in concierge_app.astream(initial_state, config=config):
+        pass
+
+    snapshot = await concierge_app.aget_state(config)
+    reply = snapshot.values.get("final_response", "")
+    resolved = snapshot.values.get("resolved", True)
+
+    if resolved:
+        return {"reply": reply, "status": "resolved"}
+
+    # Fase 5.3: the Concierge couldn't resolve it — create a real Ticket and
+    # run it through the full swarm, same as a webhook-originated ticket.
+    company = db.query(Company).filter(Company.id == current_user.company_id).first()
+    plan = company.plan if company else None
+    if plan:
+        tickets_this_month = db.query(Ticket).filter(
+            Ticket.tenant_id == company.id, Ticket.created_at >= _month_start()
+        ).count()
+        if tickets_this_month >= plan.max_tickets_per_month:
+            return {
+                "reply": f"{reply}\n\n(Your organization has reached its monthly ticket limit — please contact an admin.)",
+                "status": "resolved",
+            }
+
+    external_id = f"chat-{uuid.uuid4().hex[:10]}"
+    ticket = await _create_and_dispatch_ticket(
+        db, company, current_user, external_id, payload.message[:120], payload.message,
+        background_tasks, request.app.state.checkpointer, request.app.state.mcp_client,
+    )
+    return {"reply": reply, "status": "investigating", "ticket_external_id": ticket.external_id}

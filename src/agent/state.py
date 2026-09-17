@@ -37,6 +37,20 @@ class PolicyCheckResult(BaseModel):
     reason: str = Field(description="Explanation of why the request is compliant or not.")
 
 
+class ConciergeResult(BaseModel):
+    """Output schema for the Concierge chat node (Fase 5)."""
+    response_text: str = Field(description="The reply to show the user for this turn.")
+    resolved: bool = Field(
+        description="True if response_text fully answers the request and no Ticket is needed."
+    )
+    # Restricted at runtime to a safe allow-list (see CONCIERGE_ALLOWED_TOOLS
+    # in concierge.py) — the Concierge must never dispatch a risky MCP tool
+    # directly; anything beyond a quick lookup/healthcheck goes through a
+    # real Ticket and the full Supervisor -> Policy -> Execution swarm.
+    tool_name: Optional[str] = Field(default=None, description="Exact name of a safe MCP tool to call, or null.")
+    tool_args: dict = Field(default_factory=dict, description="Arguments for tool_name.")
+
+
 # ---------------------------------------------------------
 # LangGraph Agent State
 # ---------------------------------------------------------
@@ -63,3 +77,13 @@ class AgentState(TypedDict):
     next_agent: Optional[str]
     compliance_passed: Optional[bool]
     compliance_notes: Optional[str]
+
+
+class ConciergeState(TypedDict):
+    """State for the lightweight Concierge chat graph (Fase 5) — a single
+    node, no risk routing. Message history lives entirely in the checkpointer
+    (Fase 5.5 decision: no separate SQL transcript table for the MVP)."""
+    messages: Annotated[Sequence[BaseMessage], operator.add]
+    user_context: dict
+    resolved: Optional[bool]
+    final_response: Optional[str]
