@@ -21,6 +21,15 @@ class ExecutionPlanResult(BaseModel):
     """Output schema for the Nemotron Super Execution/Planning Node."""
     resolution_summary: str = Field(description="A brief summary of what the agent decided or did.")
     proposed_plan: Optional[str] = Field(default=None, description="The human-readable plan proposed for Risk Level 3 tickets.")
+    # Deterministic, Pydantic-validated tool dispatch (see docs/security_guardrails.md
+    # "Strict Schema Validation") instead of free-form agentic tool-calling.
+    # None means "no real-world action needed" (e.g. a pure informational answer).
+    tool_name: Optional[str] = Field(
+        default=None, description="Exact name of the MCP tool to invoke, or null if none is needed."
+    )
+    tool_args: dict = Field(
+        default_factory=dict, description="Arguments for tool_name, matching that tool's parameters exactly."
+    )
 
 class PolicyCheckResult(BaseModel):
     """Output schema for the Compliance/Policy Agent."""

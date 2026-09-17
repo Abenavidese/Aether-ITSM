@@ -25,6 +25,7 @@ def create_tenant_and_user(db: Session, user: UserCreate) -> models.User:
         current_tool=user.current_tool,
         api_key=encrypt_token(raw_api_key),
         api_key_hash=hash_api_key(raw_api_key),
+        plan_id="plan_free",  # Every tenant starts on Free; upgrades update this later.
     )
     db.add(db_company)
     db.flush() # Get company ID without committing transaction

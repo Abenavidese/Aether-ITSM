@@ -51,4 +51,6 @@ venv.bak/
 # Local databases (contain password hashes, tenant data, agent checkpoints — never commit)
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 temp_uploads/

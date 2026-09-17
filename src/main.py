@@ -4,6 +4,7 @@ from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from src.agent.mcp_client import MCPToolClient
 from src.api.routes import router as webhook_router
 from src.auth.router import router as auth_router
 from src.tenant.router import router as tenant_router
@@ -36,11 +37,15 @@ def _ensure_schema_migrations():
     """
     from sqlalchemy import text
     with engine.connect() as conn:
-        try:
-            conn.execute(text("ALTER TABLE companies ADD COLUMN api_key_hash VARCHAR"))
-            conn.commit()
-        except Exception:
-            conn.rollback()
+        for statement in (
+            "ALTER TABLE companies ADD COLUMN api_key_hash VARCHAR",
+            "ALTER TABLE tickets ADD COLUMN external_id VARCHAR",
+        ):
+            try:
+                conn.execute(text(statement))
+                conn.commit()
+            except Exception:
+                conn.rollback()
 
 
 _ensure_schema_migrations()
@@ -97,10 +102,18 @@ async def lifespan(app: FastAPI):
     """Lifecycle manager for FastAPI to handle global resources."""
     # Initialize the LangGraph checkpointer connection once for the whole app
     logger.info("Initializing AsyncSqliteSaver at %s", settings.checkpoint_db_path)
+
+    logger.info("Starting MCP tool server subprocess")
+    mcp_client = MCPToolClient()
+    await mcp_client.connect()
+
     async with AsyncSqliteSaver.from_conn_string(settings.checkpoint_db_path) as memory:
         app.state.checkpointer = memory
+        app.state.mcp_client = mcp_client
         yield
-    logger.info("Shutting down AsyncSqliteSaver")
+
+    await mcp_client.close()
+    logger.info("Shutting down AsyncSqliteSaver and MCP tool server")
 
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware

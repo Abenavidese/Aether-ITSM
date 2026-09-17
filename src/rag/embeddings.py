@@ -2,22 +2,29 @@ from src.config import get_settings
 
 def get_embeddings():
     """
-    Returns the configured embeddings model.
-    Currently uses Ollama for local open-source setup, but easily switchable to OpenAI/Nebius.
+    Returns the configured embeddings model. Model ids live in Settings
+    (src/config.py) exclusively, so switching Ollama -> Nebius/OpenAI is a
+    .env change, never a code change here.
     """
     settings = get_settings()
-    
+
     if settings.use_ollama:
         from langchain_ollama import OllamaEmbeddings
-        # Defaulting to nomic-embed-text for local vectors
-        return OllamaEmbeddings(model="nomic-embed-text")
+        return OllamaEmbeddings(model=settings.ollama_embedding_model)
+
+    from langchain_openai import OpenAIEmbeddings
+
+    if settings.nebius_api_key:
+        api_key = settings.nebius_api_key
+        base_url = "https://api.studio.nebius.ai/v1/"
+        model = settings.nebius_embedding_model
+    elif settings.openai_api_key:
+        api_key = settings.openai_api_key
+        base_url = None
+        model = settings.openai_embedding_model
     else:
-        from langchain_openai import OpenAIEmbeddings
-        api_key = settings.nebius_api_key or settings.openai_api_key
-        base_url = "https://api.studio.nebius.ai/v1/" if settings.nebius_api_key else None
-        
-        return OpenAIEmbeddings(
-            model="text-embedding-3-small", 
-            api_key=api_key,
-            base_url=base_url
+        raise RuntimeError(
+            "NEBIUS_API_KEY or OPENAI_API_KEY is required when USE_OLLAMA=False"
         )
+
+    return OpenAIEmbeddings(model=model, api_key=api_key, base_url=base_url)

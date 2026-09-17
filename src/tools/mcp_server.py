@@ -1,12 +1,13 @@
 import json
 import logging
-from mcp.server.fastmcp import FastMCP
+# mcp>=2.0 renamed FastMCP -> MCPServer (same decorator-based API otherwise).
+from mcp.server.mcpserver import MCPServer
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 # Create the MCP Server instance
-mcp = FastMCP("Aether_ITSM_Server")
+mcp = MCPServer("Aether_ITSM_Server")
 
 # ---------------------------------------------------------
 # MCP Tools Definition (Exposed over stdio)

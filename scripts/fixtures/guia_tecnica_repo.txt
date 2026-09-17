@@ -1,0 +1,82 @@
+GUÍA TÉCNICA — REPOSITORIO vertex-it-ops
+
+Propósito del repositorio
+
+vertex-it-ops es el repositorio interno donde el equipo de Infraestructura de
+Vertex Dynamics documenta los runbooks y scripts para las operaciones de
+soporte de TI más comunes. El Agente de Ejecución de Aether usa este contenido
+como base de conocimiento técnico para resolver tickets y para redactar planes
+de acción en solicitudes de mayor riesgo.
+
+Estructura del repositorio
+
+  vertex-it-ops/
+    README.md              Índice general y convenciones del repo
+    runbooks/               Procedimientos paso a paso para incidentes comunes
+      vpn-reset.md
+      mdm-software-install.md
+      aws-iam-access-request.md
+      postgres-oom-triage.md
+    scripts/                 Scripts de automatización (Python/Bash) usados por los runbooks
+    iac/                      Definiciones de Terraform para la infraestructura de AWS
+
+Runbook: Reinicio de sesión VPN (runbooks/vpn-reset.md)
+
+Síntoma típico: el usuario reporta que la VPN corporativa se queda "colgada"
+o no logra establecer conexión después de varios intentos.
+
+Procedimiento:
+1. Verificar el estado de la sesión activa del usuario en el concentrador VPN.
+2. Terminar la sesión activa (esto es exactamente lo que hace la tool
+   reset_vpn_session del servidor MCP).
+3. Indicar al usuario que reintente la conexión desde su cliente VPN local.
+4. No se requiere reinicio de ningún servicio del lado del servidor para este
+   procedimiento; es una operación de bajo riesgo y completamente reversible.
+
+Runbook: Instalación de software estándar vía MDM (runbooks/mdm-software-install.md)
+
+Síntoma típico: un nuevo empleado o alguien que cambia de equipo solicita
+Docker Desktop, Office 365 o Visual Studio Code.
+
+Procedimiento:
+1. Confirmar que el paquete solicitado está en la lista blanca de MDM
+   (pkg_docker, pkg_office365, pkg_vscode).
+2. Agregar al usuario al grupo de Active Directory correspondiente a ese
+   paquete (esto dispara la instalación automática vía el agente de MDM en
+   su equipo).
+3. La instalación puede tardar hasta 15 minutos en aplicarse en el equipo del
+   usuario; informar este tiempo estimado en la respuesta.
+4. Cualquier software fuera de esta lista blanca NO debe instalarse
+   automáticamente — debe derivarse a aprobación manual de Seguridad.
+
+Runbook: Solicitud de acceso IAM en AWS (runbooks/aws-iam-access-request.md)
+
+Síntoma típico: un Tech Lead o superior solicita permisos de AWS Admin o
+cambios de rol de IAM para un proyecto específico.
+
+Procedimiento (siempre requiere aprobación humana antes de ejecutar, ver la
+Guía de Políticas de la Empresa):
+1. Identificar el proyecto y los recursos exactos sobre los que se solicita
+   el acceso (nunca conceder acceso a nivel de cuenta completa).
+2. Redactar el diff de política de IAM propuesto: qué rol, qué nivel de
+   acceso (ReadOnly, ReadWrite, Admin) y sobre qué ARN de recursos.
+3. Presentar ese diff como plan para revisión humana. No aplicar ningún
+   cambio hasta que el plan sea aprobado explícitamente.
+4. Una vez aprobado, aplicar el cambio de política vía la tool
+   modify_iam_access, usando exactamente el alcance descrito en el plan
+   aprobado (no una versión más amplia).
+
+Runbook: Triage de errores OOM en PostgreSQL de producción (runbooks/postgres-oom-triage.md)
+
+Síntoma típico: la base de datos de producción reporta errores de "Out Of
+Memory" repetidos y el sitio se degrada.
+
+Procedimiento:
+1. Este tipo de incidente es de riesgo crítico y NUNCA se resuelve ni se
+   diagnostica de forma autónoma por el agente.
+2. El ticket debe escalarse de inmediato al equipo de guardia de SRE con toda
+   la información disponible (frecuencia de los errores, hora de inicio,
+   cambios recientes de despliegue si se conocen).
+3. No se debe intentar reiniciar el servicio de base de datos, matar
+   conexiones ni modificar parámetros de memoria como parte de una resolución
+   automática.

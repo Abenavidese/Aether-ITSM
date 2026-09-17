@@ -29,8 +29,31 @@ class Settings(BaseSettings):
     )
 
     # ── LLM Provider ──
+    # Every model name lives here and nowhere else. Swapping providers (local
+    # Ollama -> Nebius in production) is a .env change — flip USE_OLLAMA and
+    # set the nebius_* fields — never a code change in nodes.py/embeddings.py.
+    #
+    # "nano" = fast/cheap model for the Supervisor's lightweight risk
+    # classification. "super" = stronger model for the reasoning-heavy nodes
+    # (Policy, Execution, Draft Plan). Mirrors the Nemotron Nano/Super split
+    # documented in docs/architecture.md.
     use_ollama: bool = Field(default=True, description="Use local Ollama models for $0 dev")
-    ollama_model: str = "llama3.1"
+
+    ollama_model_nano: str = "llama3.2:1b"
+    ollama_model_super: str = "llama3.1:8b"
+    ollama_embedding_model: str = "nomic-embed-text"
+
+    # Placeholder Nebius Token Factory model ids — adjust to the exact
+    # catalog names when actually connecting (see docs/architecture.md,
+    # base URL https://api.studio.nebius.ai/v1/).
+    nebius_model_nano: str = "nvidia/nemotron-nano-9b-v2"
+    nebius_model_super: str = "nvidia/llama-3.3-nemotron-super-49b-v1"
+    nebius_embedding_model: str = "BAAI/bge-en-icl"
+
+    openai_model_nano: str = "gpt-4o-mini"
+    openai_model_super: str = "gpt-4o"
+    openai_embedding_model: str = "text-embedding-3-small"
+
     nebius_api_key: str | None = None
     openai_api_key: str | None = None
 
@@ -72,26 +95,35 @@ def get_settings() -> Settings:
 def get_llms():
     """
     Returns a tuple of (llm_nano, llm_super).
-    Reads USE_OLLAMA to determine if it should use local free models or Nebius Production models.
+    Reads USE_OLLAMA to determine if it should use local free models or a
+    hosted OpenAI-compatible provider (Nebius Token Factory, or plain OpenAI
+    as a fallback). Which exact model id is used for each role is entirely
+    controlled by the settings above — never hardcoded here.
     """
     settings = get_settings()
 
     if settings.use_ollama:
         from langchain_ollama import ChatOllama
 
-        llm_nano = ChatOllama(model=settings.ollama_model, temperature=0.0)
-        llm_super = ChatOllama(model=settings.ollama_model, temperature=0.0)
+        llm_nano = ChatOllama(model=settings.ollama_model_nano, temperature=0.0)
+        llm_super = ChatOllama(model=settings.ollama_model_super, temperature=0.0)
+        return llm_nano, llm_super
+
+    from langchain_openai import ChatOpenAI
+
+    if settings.nebius_api_key:
+        api_key = settings.nebius_api_key
+        base_url = "https://api.studio.nebius.ai/v1/"
+        nano_model, super_model = settings.nebius_model_nano, settings.nebius_model_super
+    elif settings.openai_api_key:
+        api_key = settings.openai_api_key
+        base_url = None
+        nano_model, super_model = settings.openai_model_nano, settings.openai_model_super
     else:
-        from langchain_openai import ChatOpenAI
+        raise RuntimeError(
+            "NEBIUS_API_KEY or OPENAI_API_KEY is required when USE_OLLAMA=False"
+        )
 
-        api_key = settings.nebius_api_key or settings.openai_api_key
-        if not api_key:
-            raise RuntimeError(
-                "NEBIUS_API_KEY or OPENAI_API_KEY is required when USE_OLLAMA=False"
-            )
-        base_url = "https://api.studio.nebius.ai/v1/" if settings.nebius_api_key else None
-
-        llm_nano = ChatOpenAI(model="gpt-4o-mini", temperature=0.0, api_key=api_key, base_url=base_url)
-        llm_super = ChatOpenAI(model="gpt-4o", temperature=0.0, api_key=api_key, base_url=base_url)
-
+    llm_nano = ChatOpenAI(model=nano_model, temperature=0.0, api_key=api_key, base_url=base_url)
+    llm_super = ChatOpenAI(model=super_model, temperature=0.0, api_key=api_key, base_url=base_url)
     return llm_nano, llm_super

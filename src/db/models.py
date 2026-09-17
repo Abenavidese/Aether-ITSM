@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, Integer, Float
+from sqlalchemy import Column, String, ForeignKey, DateTime, Integer, Float, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -62,10 +62,17 @@ class User(Base):
 
 class Ticket(Base):
     __tablename__ = "tickets"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "external_id", name="uq_ticket_tenant_external"),
+    )
 
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(String, ForeignKey("companies.id"), nullable=False)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # The ITSM/SDK-side ticket identifier (e.g. "IT-101"). Distinct from `id`
+    # (our internal PK) so a re-delivered webhook can be recognized and
+    # skipped instead of reprocessing the same ticket twice.
+    external_id = Column(String, nullable=True, index=True)
     
     title = Column(String, nullable=False)
     description = Column(String, nullable=False)
@@ -75,7 +82,7 @@ class Ticket(Base):
     category = Column(String, default="general") # software, hardware, access, network, general
     
     # Tracking
-    status = Column(String, default="open") # open, resolved, escalated_github, pending_human
+    status = Column(String, default="open") # open, resolved, escalated, escalated_github, pending_human
     resolution_path = Column(String, nullable=True) # autonomous, human, github
     
     # Deep Metrics & ROI

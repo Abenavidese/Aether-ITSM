@@ -1,0 +1,240 @@
+PLAN DE IMPLEMENTACION - AETHER ITSM
+Ultima actualizacion: ver historial de git de este archivo.
+
+Como usar este documento
+-------------------------
+Las fases estan en orden de cascada: cada una depende de que la anterior
+exista, no solo de que "tenga sentido" hacerla antes. No saltar una fase
+sin haber marcado sus items como hechos, o la siguiente se construye sobre
+algo que no esta ahi todavia.
+
+Cada item tiene: que es, por que va en ese orden (de que depende), y que
+archivos toca aproximadamente. Se implementa de a uno, y se marca [DONE]
+al terminar.
+
+
+FASE 0 - YA RESUELTO EN ESTA SESION (contexto, no accion)
+-----------------------------------------------------------
+[DONE] Multi-tenant: tenant_id ahora se propaga del webhook al grafo
+       (antes el Policy/Execution Agent nunca leian RAG en tickets reales).
+[DONE] IDOR en /approve: threads namespaced por company_id, rol restringido
+       a admin/superadmin (se saco "employee" de la lista).
+[DONE] Cookie de sesion: flag Secure consistente via COOKIE_SECURE, un solo
+       helper (src/security/cookies.py) en vez de logica duplicada.
+[DONE] API key del webhook: hash SHA-256 para verificar + copia cifrada
+       (Fernet) solo para mostrarla de vuelta al tenant. Auto-migracion de
+       filas viejas en texto plano.
+[DONE] Rate limiting en /webhook/ticket (30/min).
+[DONE] Validacion de formato de github_repo (owner/repo) antes de usarlo en
+       una URL de la API de GitHub.
+[DONE] app.db y checkpoints.db destrackeados de git (quedan en .gitignore).
+       PENDIENTE: decidir si se purga el historial viejo (ver Fase 8.2).
+[DONE] Ticket ahora se persiste de verdad: el webhook crea la fila, el grafo
+       la actualiza al terminar (resolved/escalated/pending_human).
+[DONE] Aprobar un plan de Riesgo 3 ahora SI ejecuta la accion (antes
+       draft_plan terminaba en END sin hacer nada). Rechazar ahora SI
+       escala en vez de dejar el thread colgado para siempre.
+[DONE] Solo admin/superadmin aprueban Riesgo 3.
+[DONE] Limites de plan (max_tickets_per_month, max_ai_resolutions_per_month)
+       aplicados de verdad; todo tenant nuevo arranca en plan_free.
+[DONE] Idempotencia: reenviar el mismo ticket_id no reprocesa ni duplica.
+[DONE] user_email obligatorio y debe existir como User en Aether (antes era
+       un string suelto sin validar).
+[DONE] scripts/e2e_ollama.py: prueba end-to-end contra la API real (no el
+       grafo aislado) cubriendo todo lo anterior.
+[DONE] GET /api/tenant/tickets/{external_id} para hacer polling del estado
+       de un ticket (lo necesita el script E2E y cualquier integracion SDK).
+
+
+FASE 1 - PRE-REQUISITO BLOQUEANTE: ENTORNO OLLAMA
+-----------------------------------------------------------
+Nada de lo que sigue se puede probar en serio sin esto. Es responsabilidad
+del entorno local, no de codigo.
+
+1.1 [ ] Descargar el modelo de embeddings: ollama pull nomic-embed-text
+        (hoy no esta instalado, el RAG no puede vectorizar nada sin esto).
+1.2 [ ] Resolver el mismatch de tag del modelo de chat: hoy solo esta
+        "llama3.1:8b" instalado, pero el codigo pide "llama3.1" a secas
+        (que Ollama resuelve como "llama3.1:latest", un tag que no existe
+        en esta maquina). O se hace "ollama pull llama3.1", o se pone
+        OLLAMA_MODEL=llama3.1:8b en .env.
+1.3 [ ] Correr "python scripts/e2e_ollama.py" y que pase completo en verde.
+        Este es el gate para arrancar la Fase 2 en adelante: si el swarm
+        basico no resuelve tickets reales todavia, construir features
+        nuevas encima es construir sobre arena.
+
+
+FASE 2 - CONECTAR EL "BRAZO EJECUTOR" REAL (MCP) AL GRAFO
+-----------------------------------------------------------
+Bloqueante para TODO lo que sigue que implique "el agente hace algo de
+verdad" (issues de GitHub, chequeo de estado de servidor, etc). Hoy
+execution_agent_node no ejecuta ninguna tool real - el LLM redacta un
+resumen de texto libre ("Action Executed: ...") y ahi termina. El
+mcp_server.py con las 4 tools (reset_vpn_session, provision_standard_
+software, modify_iam_access, query_knowledge_base) existe pero esta
+completamente desconectado del grafo.
+
+2.1 [DONE] Cliente MCP dentro del grafo: src/agent/mcp_client.py maneja la
+        conexion stdio de vida larga al FastMCP server (una sola vez en el
+        lifespan de FastAPI, no por-request), inyectado a execution_agent_node
+        via config["configurable"] (mismo mecanismo que ya se usaba para
+        thread_id). De paso goteo encontrado y arreglado: mcp==2.1.1 renombro
+        FastMCP -> MCPServer; src/tools/mcp_server.py nunca pudo correr con
+        la version pineada en requirements.txt hasta este fix.
+2.2 [DONE] ExecutionPlanResult ahora tiene tool_name/tool_args (Pydantic,
+        validado). El catalogo de tools se lee en vivo del servidor
+        (mcp_client.prompt_catalog()) y se inyecta en el prompt - nunca se
+        duplica a mano, asi que agregar una tool nueva a mcp_server.py no
+        requiere tocar los prompts.
+2.3 [DONE] call_tool() rechaza cualquier tool_name no registrado (ValueError),
+        y cualquier fallo de la llamada MCP cae en el except existente de
+        execution_agent_node -> technical_error=True -> escalate_node.
+2.4 [ ] Actualizar docs/security_guardrails.md si el mecanismo real de
+        invocacion difiere de lo ya documentado (statu quo: mantenerlo
+        honesto con lo que el codigo realmente hace).
+2.5 [DONE] Hallazgo real durante la validacion E2E (no hipotetico): con MCP
+        conectado de verdad, una mala clasificacion del modelo local dejo
+        pasar un ticket de "AWS Admin/IAM" como riesgo bajo y
+        modify_iam_access se ejecuto SIN aprobacion humana - exactamente lo
+        que security_guardrails.md dice que "Python fuerza" pero el codigo
+        nunca implementaba. Arreglado en src/agent/risk_policy.py: piso de
+        riesgo deterministico (IAM/admin -> minimo 3, prod DB/firewall ->
+        minimo 4) que el LLM solo puede subir, nunca bajar. Confirmado con
+        una corrida E2E completa despues del fix: el mismo ticket ahora
+        pausa correctamente en draft_plan antes de ejecutar.
+
+
+FASE 3 - ISSUE DE GITHUB PARA ESCALAMIENTO A INGENIERIA
+-----------------------------------------------------------
+Depende de Fase 2 (necesita el mecanismo de tool-calling ya conectado).
+Es la pieza mas barata de construir de todo el roadmap nuevo: reutiliza
+el github_token ya cifrado, el patron de llamada HTTP que ya existe en
+GET /tenant/test-github, y una columna del modelo que existe hace rato
+sin usarse (Ticket.github_issue_url).
+
+3.1 [ ] Tool nueva: create_github_issue(repo, token, title, body) -> URL
+        del issue creado. Puede vivir como tool de mcp_server.py o como
+        una funcion directa en src/tools/ si no necesita pasar por MCP.
+3.2 [ ] Enganchar la creacion del issue en escalate_node (o inmediatamente
+        despues, en run_agent_background) cuando el ticket termina
+        escalado - titulo = resumen del ticket, cuerpo = descripcion +
+        razon de escalamiento + notas de compliance si aplica.
+3.3 [ ] Guardar la URL resultante en Ticket.github_issue_url al sincronizar
+        el estado (ya existe _sync_ticket_from_snapshot en routes.py, se
+        extiende ahi).
+3.4 [ ] Verificar que el dashboard ya muestra el link (ticket_stream en
+        tenant/router.py ya incluye github_issue_url, solo falta que deje
+        de ser siempre null).
+3.5 [ ] Decidir que pasa si la empresa no configuro github_token/repo
+        todavia (fallback: escalar sin issue, no romper el flujo).
+
+
+FASE 4 - TOOL DE ESTADO DE SERVIDOR/SERVICIO
+-----------------------------------------------------------
+Independiente de la Fase 3 (no se bloquean entre si), pero depende de
+Fase 2 igual que cualquier tool real.
+
+4.1 [ ] Definir que "servicios" puede consultar el agente: para el demo,
+        una lista simple configurable por tenant (nombre + URL de
+        healthcheck) es suficiente. No hace falta un sistema de monitoreo
+        real todavia.
+4.2 [ ] Tool nueva: check_service_status(service_name) -> healthcheck HTTP
+        real contra la URL configurada, con timeout corto y manejo de
+        caida de red como "no disponible" (no como error tecnico del
+        agente).
+4.3 [ ] Prompt del agente: cuando la descripcion del ticket/mensaje suene
+        a "no puedo conectarme/entrar", debe considerar esta tool antes de
+        asumir que es un problema del lado del usuario.
+
+
+FASE 5 - ENDPOINT DE CHAT SINCRONO
+-----------------------------------------------------------
+La pieza mas grande del roadmap nuevo. Depende de Fase 2 (necesita tools
+reales para poder responder "el servidor esta caido" o crear un issue en
+el mismo turno) y se beneficia de Fase 3 y 4 ya existiendo, pero puede
+arrancarse con un triage mas simple si se prioriza esto primero.
+
+5.1 [ ] Decidir el modelo de conversacion: un thread_id por conversacion de
+        chat (no por ticket_id de ITSM) - probablemente uno por usuario
+        activo, persistido igual que los threads de ticket via el mismo
+        checkpointer.
+5.2 [ ] Nodo de triage ligero ("Concierge"): intenta responder directo con
+        RAG + las tools de las Fases 3/4 ANTES de escalar al Supervisor
+        pesado de riesgo 0-4. La mayoria de "no me deja entrar" deberian
+        resolverse aca sin generar un Ticket formal.
+5.3 [ ] Definir el criterio de "esto si necesita convertirse en Ticket": si
+        el Concierge no puede resolverlo en 1-2 turnos, ahi si se crea un
+        Ticket real y se sigue el flujo ya existente (Supervisor -> Policy
+        -> Execution/Draft Plan).
+5.4 [ ] Nuevo endpoint POST /api/chat: auth por cookie de sesion normal (el
+        empleado ya logueado), no por x-api-key de webhook. Devuelve la
+        respuesta del turno actual (sincrono esta bien para el MVP;
+        streaming es una mejora posterior, no un requisito).
+5.5 [ ] Historial de conversacion: decidir si vive solo en el checkpointer
+        de LangGraph o si tambien se persiste en SQL para poder mostrarlo
+        en el dashboard de admin.
+
+
+FASE 6 - BUSQUEDA DE CODIGO ON-DEMAND EN GITHUB
+-----------------------------------------------------------
+Depende de Fase 5 (el chat es el consumidor natural de esto) y de tener
+un github_token con scope de lectura de codigo ya configurado (Fase 0,
+onboarding). Deliberadamente NO se propone indexar todo el repo en
+pgvector: el chunking de texto plano no funciona bien para codigo, y un
+indice pre-calculado se desactualiza. Mas simple y mas preciso: una tool
+que busca on-demand cuando el agente la necesita.
+
+6.1 [ ] Tool nueva: search_github_code(repo, token, query) usando la API
+        de busqueda de codigo de GitHub.
+6.2 [ ] Logica/prompt para que el agente decida cuando vale la pena usar
+        esta tool (preguntas que mencionan algo especifico del proyecto,
+        no problemas genericos de "la VPN no conecta").
+6.3 [ ] Documentar limitaciones: rate limits de la API de busqueda de
+        GitHub, y que el token necesita el scope correcto si el repo es
+        privado.
+
+
+FASE 7 - FRONTEND: DEJAR DE SIMULAR
+-----------------------------------------------------------
+Depende de que la Fase 5 (endpoint de chat) exista. La Fase 7.3 depende
+solamente de que /api/approve ya funcione (Fase 0, ya esta listo hoy).
+
+7.1 [ ] frontend/src/features/portal/hooks/useChat.ts: reemplazar el
+        setTimeout + matching de keywords por un fetch real a POST
+        /api/chat.
+7.2 [ ] Manejar los tres estados de respuesta en la UI: resuelto en el
+        momento, "estoy investigando, te aviso" (si el Concierge crea un
+        Ticket y sigue en progreso), y escalado (mostrar el link al issue
+        de GitHub si se creo uno, Fase 3).
+7.3 [ ] frontend/src/features/admin/pages/AdminDashboardPage.tsx: el boton
+        de aprobar hoy solo hace console.log ("Phase 2" en el codigo) -
+        conectarlo a POST /api/approve/{ticket_id}, que ya funciona
+        correctamente del lado del backend.
+
+
+FASE 8 - DEUDA TECNICA (no bloqueante, pero hay que agendarla)
+-----------------------------------------------------------
+No bloquea ninguna fase de arriba, pero sin esto el proyecto no aguanta
+una revision tecnica a fondo ni un escenario de carga real.
+
+8.1 [ ] Arreglar el harness de pytest: hoy 0 tests pasan en Windows porque
+        src/main.py crea el engine de SQLAlchemy a nivel de modulo (import
+        time) y el fixture de test intenta borrar el archivo despues,
+        cosa que Windows no permite con el archivo todavia abierto.
+8.2 [ ] Decidir si se purga app.db/checkpoints.db del historial de git
+        (commits viejos todavia los tienen) o si se acepta el riesgo dado
+        que es un proyecto de portafolio/hackathon sin datos reales de
+        clientes en juego.
+8.3 [ ] Migrar el checkpointer de AsyncSqliteSaver a AsyncPostgresSaver
+        antes de probar con multiples tickets concurrentes o multiples
+        workers de Uvicorn (SQLite serializa escrituras y no coordina
+        entre procesos).
+8.4 [ ] La heuristica de ahorro de tiempo/costo en el dashboard es hoy una
+        constante fija (15 min / $12.50 por ticket auto-resuelto,
+        documentado como placeholder en el codigo) - refinar cuando haya
+        datos reales de cuanto tarda cada categoria de ticket.
+8.5 [ ] El limite max_ai_resolutions_per_month se aplica por conteo de
+        tickets ya procesados en el mes, no por "intentos de IA" mas
+        finos (ej. reintentos de structured output no cuentan aparte) -
+        revisar si el conteo actual es suficientemente preciso para
+        cobrar por plan mas adelante.

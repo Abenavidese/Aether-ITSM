@@ -240,3 +240,30 @@ def get_dashboard_metrics(db: Session = Depends(get_db), current_user: User = De
         },
         "tickets": ticket_stream
     }
+
+
+@router.get("/tickets/{external_id}")
+def get_ticket_by_external_id(external_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Looks up a ticket by the ITSM/SDK-side identifier the webhook received it
+    with (Ticket.external_id), not our internal UUID. Ticket processing is
+    async (BackgroundTasks), so an SDK integration — or this project's own
+    E2E test script — needs a way to poll for the outcome after a 202.
+    """
+    ticket = db.query(Ticket).filter(
+        Ticket.tenant_id == current_user.company_id, Ticket.external_id == external_id
+    ).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+
+    return {
+        "id": ticket.id,
+        "external_id": ticket.external_id,
+        "title": ticket.title,
+        "status": ticket.status,
+        "resolution_path": ticket.resolution_path,
+        "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+        "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+        "estimated_time_saved_minutes": ticket.estimated_time_saved_minutes,
+        "cost_saved_usd": ticket.cost_saved_usd,
+    }

@@ -1,0 +1,73 @@
+GUÍA DE POLÍTICAS DE TI — VERTEX DYNAMICS S.A.S.
+
+Sobre la empresa
+
+Vertex Dynamics S.A.S. es una empresa de software y logística con sede en Bogotá,
+Colombia, con aproximadamente 180 empleados distribuidos en los equipos de
+Ingeniería, Operaciones, Ventas y Soporte. La infraestructura de la compañía
+corre principalmente sobre AWS, el código se gestiona en GitHub y los tickets
+de soporte interno se manejan a través de Jira Service Management.
+
+Este documento resume las políticas de TI que el asistente Aether debe
+respetar al evaluar y resolver solicitudes de soporte.
+
+Política de acceso a VPN
+
+Cualquier empleado puede solicitar el reinicio de su propia sesión de VPN sin
+necesidad de aprobación adicional. Es una operación de bajo riesgo, reversible
+y no requiere intervención de un administrador. El sistema puede ejecutar esta
+acción de forma autónoma.
+
+Política de software estándar (MDM)
+
+Los siguientes paquetes de software están pre-aprobados para instalación
+automática en los equipos de los empleados a través del grupo de MDM:
+Docker Desktop (pkg_docker), Microsoft Office 365 (pkg_office365) y
+Visual Studio Code (pkg_vscode). Cualquier solicitud de instalación de estos
+paquetes puede resolverse automáticamente sin aprobación humana.
+
+La instalación de cualquier otro software que no esté en esta lista requiere
+aprobación manual del equipo de Seguridad de la Información y no debe
+ejecutarse de forma automática bajo ninguna circunstancia.
+
+Política de acceso a AWS e IAM
+
+El acceso a roles de IAM en AWS es una operación de alto riesgo y nunca debe
+ejecutarse de forma completamente automática, sin importar el cargo de quien
+lo solicite. Las solicitudes de acceso AWS Admin o de modificación de
+políticas de IAM se consideran conformes con la política ("compliant")
+únicamente cuando:
+
+1. La persona que solicita el acceso tiene el cargo de Tech Lead, Engineering
+   Manager o superior.
+2. El acceso solicitado está limitado a los recursos de un proyecto
+   específico del que la persona es responsable (no acceso administrativo
+   global de la cuenta de AWS).
+3. La solicitud incluye una justificación de negocio clara (por ejemplo,
+   un despliegue, una migración o una tarea de mantenimiento programada).
+
+Incluso cuando una solicitud cumple estos tres criterios, el cambio de IAM
+jamás se ejecuta sin que un administrador humano revise y apruebe el plan
+propuesto explícitamente. Ninguna excepción a esta regla está permitida.
+
+Las solicitudes de acceso administrativo global a la cuenta de AWS (root o
+equivalente), o las solicitudes que no identifiquen un proyecto y una
+justificación concretos, se consideran no conformes con la política y deben
+escalarse directamente a un humano sin generar un plan de ejecución.
+
+Política de acceso a bases de datos de producción
+
+Ninguna solicitud relacionada con el acceso, modificación o intervención
+directa sobre las bases de datos de producción (por ejemplo, PostgreSQL de
+producción) puede resolverse de forma autónoma ni mediante un plan aprobado
+por un solo administrador. Cualquier incidente o solicitud de esta naturaleza
+debe escalarse inmediatamente al equipo de Sitio (SRE) y considerarse de
+riesgo crítico.
+
+Confidencialidad y manejo de datos sensibles
+
+El asistente no debe incluir contraseñas, tokens de acceso, direcciones IP
+internas ni información personal identificable de clientes en los resúmenes
+de resolución que se publican de vuelta en el sistema de tickets. Cualquier
+solicitud que implique compartir credenciales por el canal de tickets debe
+tratarse como una posible violación de seguridad y escalarse.

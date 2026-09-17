@@ -29,6 +29,26 @@ def route_from_execution(state: AgentState) -> str:
 
     return "end"
 
+def route_from_draft_plan(state: AgentState) -> str:
+    """Conditional Edge logic routing from the paused Draft Plan node.
+
+    This edge is only ever evaluated on resume (interrupt_after pauses the
+    graph right after draft_plan runs, before this router is consulted).
+    approve_ticket sets `human_approved` via aupdate_state right before
+    resuming, so by the time we get here the human's decision is already
+    in state:
+      - approved  -> actually execute the plan (it used to dead-end at END,
+        meaning "approval" never ran anything)
+      - rejected  -> escalate to a human queue instead of silently leaving
+        the thread paused forever
+    """
+    if state.get("technical_error"):
+        return "escalate"
+    if state.get("human_approved") is False:
+        return "escalate"
+
+    return "execution"
+
 def get_workflow() -> StateGraph:
     """Builds and returns the uncompiled StateGraph for Aether ITSM Multi-Agent Swarm."""
     workflow = StateGraph(AgentState)
@@ -75,8 +95,17 @@ def get_workflow() -> StateGraph:
         }
     )
 
+    # Routing from Draft Plan (paused for human approval, see route_from_draft_plan)
+    workflow.add_conditional_edges(
+        "draft_plan",
+        route_from_draft_plan,
+        {
+            "escalate": "escalate",
+            "execution": "execution"
+        }
+    )
+
     # Terminal nodes
-    workflow.add_edge("draft_plan", END)
     workflow.add_edge("escalate", END)
     
     return workflow
