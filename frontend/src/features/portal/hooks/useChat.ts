@@ -1,5 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Message } from '../components/ChatBubble';
+import { config } from '../../../config';
+
+const POLL_INTERVAL_MS = 5000;
+const POLL_MAX_ATTEMPTS = 12; // ~1 minute
 
 export function useChat() {
   const [input, setInput] = useState("");
@@ -17,39 +21,81 @@ export function useChat() {
     scrollToBottom();
   }, [messages]);
 
+  const appendAgentMessage = (text: string) => {
+    setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, sender: 'agent', text }]);
+  };
+
+  const pollTicketUntilSettled = async (externalId: string) => {
+    for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      try {
+        const res = await fetch(`${config.API_BASE_URL}/tenant/tickets/${externalId}`, {
+          credentials: 'include'
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+
+        if (data.status === 'resolved') {
+          appendAgentMessage("Update: your request has been resolved.");
+          return;
+        }
+        if (data.status === 'escalated') {
+          appendAgentMessage(
+            data.github_issue_url
+              ? `Update: this was escalated to engineering. Tracking issue: ${data.github_issue_url}`
+              : "Update: this was escalated to our engineering team."
+          );
+          return;
+        }
+      } catch {
+        // Transient network error — keep polling until POLL_MAX_ATTEMPTS.
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() && !image) return;
 
-    const userMessage: Message = { 
-      id: Date.now().toString(), 
-      sender: 'user', 
-      text: input || "Sent an attachment.", 
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      sender: 'user',
+      text: input || "Sent an attachment.",
       image_url: image || undefined
     };
-    
+
     setMessages(prev => [...prev, userMessage]);
     setInput("");
     setImage(null);
 
-    // Simulate Agent Thinking
     const thinkingId = (Date.now() + 1).toString();
     setMessages(prev => [...prev, { id: thinkingId, sender: 'agent', text: "Analyzing request...", isThinking: true }]);
 
-    // Simulated Agent Logic based on input keywords
-    await new Promise(r => setTimeout(r, 2000));
-    
-    setMessages(prev => prev.filter(m => m.id !== thinkingId));
+    try {
+      const res = await fetch(`${config.API_BASE_URL}/chat`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMessage.text })
+      });
+      const data = await res.json();
 
-    let responseText = "I've logged a ticket for this issue and an engineer will look into it shortly.";
-    
-    if (userMessage.text.toLowerCase().includes("vpn")) {
-      responseText = "Done! I've cleared your active VPN sessions. Please try reconnecting now. If you still have issues, let me know.";
-    } else if (userMessage.text.toLowerCase().includes("aws") || userMessage.text.toLowerCase().includes("admin")) {
-      responseText = "I've drafted a plan to grant you AWS Admin access. Because this is a High Risk (L3) request, it requires security approval. I've sent it to the IT queue and will notify you once approved.";
+      setMessages(prev => prev.filter(m => m.id !== thinkingId));
+
+      if (!res.ok) {
+        appendAgentMessage(data.detail || "Sorry, I couldn't process that. Please try again.");
+        return;
+      }
+
+      appendAgentMessage(data.reply);
+
+      if (data.status === 'investigating' && data.ticket_external_id) {
+        pollTicketUntilSettled(data.ticket_external_id);
+      }
+    } catch (err) {
+      setMessages(prev => prev.filter(m => m.id !== thinkingId));
+      appendAgentMessage("Failed to reach Aether. Please check your connection and try again.");
     }
-
-    setMessages(prev => [...prev, { id: Date.now().toString(), sender: 'agent', text: responseText }]);
   };
 
   return {

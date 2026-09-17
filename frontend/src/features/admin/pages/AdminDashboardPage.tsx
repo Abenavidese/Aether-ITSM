@@ -3,12 +3,13 @@ import { MetricsBar } from '../components/MetricsBar';
 import { TicketCard } from '../components/TicketCard';
 import { HumanGatePanel } from '../components/HumanGatePanel';
 import { config } from '../../../config';
+import type { DashboardTicket } from '../types';
 
 export function AdminDashboardPage() {
-  
+
   const [dashboardData, setDashboardData] = useState<{
     metrics: { auto_deflection_rate: number, time_saved_hours: number, pending_human: number, cost_saved_usd: number },
-    tickets: any[]
+    tickets: DashboardTicket[]
   } | null>(null);
 
   const fetchDashboard = async () => {
@@ -32,8 +33,6 @@ export function AdminDashboardPage() {
   }, []);
 
   const approveTicket = async (ticketId: string, approved: boolean, feedback?: string) => {
-    console.log(`Ticket ${ticketId} human review: ${approved}, feedback: ${feedback}`);
-    
     if (feedback && !approved) {
       try {
         await fetch(`${config.API_BASE_URL}/tenant/knowledge/feedback`, {
@@ -45,13 +44,27 @@ export function AdminDashboardPage() {
             feedback_text: feedback
           })
         });
-        alert('Feedback saved to AI Memory.');
       } catch (err) {
         console.error('Failed to save AI feedback', err);
       }
     }
-    
-    // In Phase 2, this will also send a real POST request to resolve/escalate the ticket status
+
+    try {
+      const res = await fetch(`${config.API_BASE_URL}/approve/${ticketId}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved, approver_id: 'admin' })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.error('Approve request failed', data);
+        return;
+      }
+      fetchDashboard();
+    } catch (err) {
+      console.error('Failed to submit approval', err);
+    }
   };
 
   return (

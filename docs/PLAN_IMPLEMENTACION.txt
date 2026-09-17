@@ -233,17 +233,27 @@ FASE 7 - FRONTEND: DEJAR DE SIMULAR
 Depende de que la Fase 5 (endpoint de chat) exista. La Fase 7.3 depende
 solamente de que /api/approve ya funcione (Fase 0, ya esta listo hoy).
 
-7.1 [ ] frontend/src/features/portal/hooks/useChat.ts: reemplazar el
-        setTimeout + matching de keywords por un fetch real a POST
-        /api/chat.
-7.2 [ ] Manejar los tres estados de respuesta en la UI: resuelto en el
-        momento, "estoy investigando, te aviso" (si el Concierge crea un
-        Ticket y sigue en progreso), y escalado (mostrar el link al issue
-        de GitHub si se creo uno, Fase 3).
-7.3 [ ] frontend/src/features/admin/pages/AdminDashboardPage.tsx: el boton
-        de aprobar hoy solo hace console.log ("Phase 2" en el codigo) -
-        conectarlo a POST /api/approve/{ticket_id}, que ya funciona
-        correctamente del lado del backend.
+7.1 [DONE] useChat.ts: fetch real a POST /api/chat (credentials: 'include'),
+        reemplazando el setTimeout + matching de keywords.
+7.2 [DONE] Tres estados manejados: resuelto en el momento (reply directo),
+        "investigating" (se muestra el reply del Concierge y se hace poll
+        de GET /tenant/tickets/{external_id} cada 5s hasta 1 minuto), y
+        escalado (mensaje de seguimiento con el link al issue de GitHub si
+        existe). GET /tenant/tickets/{external_id} ahora tambien devuelve
+        github_issue_url (antes no lo exponia).
+7.3 [DONE] Bug real encontrado y corregido: HumanGatePanel.tsx filtraba
+        status === 'paused' (un valor que la API real nunca manda) contra
+        tickets con campos inventados (summary, risk_level, user_id) que
+        el backend tampoco manda (title, urgency, category, description
+        si). El Human Gate estaba SIEMPRE vacio en la practica. Se creo
+        frontend/src/features/admin/types.ts (DashboardTicket, el shape
+        real de GET /tenant/dashboard) y se reescribieron TicketCard.tsx y
+        HumanGatePanel.tsx para usarlo; useSimulation.ts (mock sin uso real,
+        solo consumido por estos dos componentes) se elimino por completo.
+        Boton Approve conectado a POST /api/approve/{external_id}.
+        Verificado con `tsc -b`: cero errores nuevos (queda 1 error
+        preexistente y no relacionado en OnboardingPage.tsx, fuera de
+        alcance de esta fase).
 
 
 FASE 8 - DEUDA TECNICA (no bloqueante, pero hay que agendarla)

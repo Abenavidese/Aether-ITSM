@@ -209,7 +209,9 @@ def get_dashboard_metrics(db: Session = Depends(get_db), current_user: User = De
     for t in recent_tickets:
         ticket_stream.append({
             "id": t.id,
+            "external_id": t.external_id,
             "title": t.title,
+            "description": t.description,
             "status": t.status,
             "urgency": t.urgency,
             "category": t.category,
@@ -255,4 +257,5 @@ def get_ticket_by_external_id(external_id: str, db: Session = Depends(get_db), c
         "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
         "estimated_time_saved_minutes": ticket.estimated_time_saved_minutes,
         "cost_saved_usd": ticket.cost_saved_usd,
+        "github_issue_url": ticket.github_issue_url,
     }
