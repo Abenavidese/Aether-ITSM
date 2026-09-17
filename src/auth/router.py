@@ -7,6 +7,7 @@ from src.auth.exceptions import EmailAlreadyRegistered, InvalidCredentials
 from src.security.jwt import create_access_token
 from src.security.deps import get_current_user
 from src.security.limiter import limiter
+from src.security.cookies import set_auth_cookie, clear_auth_cookie
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -36,21 +37,13 @@ def login(request: Request, user_credentials: schemas.UserLogin, response: Respo
     }
     
     access_token = create_access_token(data=token_data)
-    
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=False, # Must be false for http://localhost development
-        samesite="lax",
-        max_age=24 * 60 * 60 # 24 hours
-    )
-    
+    set_auth_cookie(response, access_token)
+
     return {"status": "success", "message": "Logged in successfully"}
 
 @router.post("/logout")
 def logout(response: Response):
-    response.delete_cookie("access_token", secure=False, samesite="lax")
+    clear_auth_cookie(response)
     return {"status": "success", "message": "Logged out successfully"}
 
 @router.get("/me")

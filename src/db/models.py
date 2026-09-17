@@ -27,7 +27,8 @@ class Company(Base):
     
     # Integration & Onboarding Settings
     onboarding_completed = Column(String, default="false") # SQLite boolean compatibility
-    api_key = Column(String, unique=True, nullable=True) # Kept for legacy/SDK
+    api_key = Column(String, unique=True, nullable=True)  # Fernet-encrypted — decrypted only for display in Settings
+    api_key_hash = Column(String, unique=True, nullable=True, index=True)  # SHA-256 — used to verify webhook calls
     webhook_url = Column(String, nullable=True) # Kept for legacy
     github_token = Column(String, nullable=True)
     github_repo = Column(String, nullable=True)

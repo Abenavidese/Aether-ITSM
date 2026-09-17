@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
 from src.db import models
 from src.security.hashing import get_password_hash, verify_password
+from src.security.api_keys import generate_api_key, hash_api_key
+from src.security.encryption import encrypt_token
 from src.auth.schemas import UserCreate
 from src.auth.exceptions import EmailAlreadyRegistered, InvalidCredentials
 
@@ -12,15 +14,17 @@ def create_tenant_and_user(db: Session, user: UserCreate) -> models.User:
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user:
         raise EmailAlreadyRegistered(user.email)
-        
-    import secrets
-    # Create Company
+
+    # The raw key is never persisted: api_key_hash verifies webhook calls,
+    # api_key stores an encrypted copy purely so Settings can redisplay it.
+    raw_api_key = generate_api_key()
     db_company = models.Company(
         name=user.company_name,
         company_size=user.company_size,
         industry=user.industry,
         current_tool=user.current_tool,
-        api_key=secrets.token_urlsafe(32)
+        api_key=encrypt_token(raw_api_key),
+        api_key_hash=hash_api_key(raw_api_key),
     )
     db.add(db_company)
     db.flush() # Get company ID without committing transaction

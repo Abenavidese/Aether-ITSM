@@ -1,5 +1,5 @@
 import operator
-from typing import Annotated, Sequence, TypedDict, Optional
+from typing import Annotated, Literal, Sequence, TypedDict, Optional
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
@@ -10,8 +10,12 @@ from pydantic import BaseModel, Field
 class ClassificationResult(BaseModel):
     """Output schema for the Nemotron Nano Classification Node."""
     intent: str = Field(description="The core intent of the ticket, e.g., 'vpn_reset', 'software_install', 'db_issue'")
-    risk_level: int = Field(description="Assessed risk level from 0 to 4 based on policy.")
-    tools_required: list[str] = Field(description="List of MCP tools that might be needed.")
+    # Literal (not int) so the schema itself rejects out-of-range values the
+    # model might hallucinate, instead of silently producing an unroutable state.
+    risk_level: Literal[0, 1, 2, 3, 4] = Field(description="Assessed risk level from 0 to 4 based on policy.")
+    # Optional with a default: a local model omitting this non-critical field
+    # shouldn't fail validation for the whole (correctly classified) result.
+    tools_required: list[str] = Field(default_factory=list, description="List of MCP tools that might be needed.")
 
 class ExecutionPlanResult(BaseModel):
     """Output schema for the Nemotron Super Execution/Planning Node."""

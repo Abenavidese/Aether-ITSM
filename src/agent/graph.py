@@ -13,8 +13,21 @@ def route_from_policy(state: AgentState) -> str:
     """Conditional Edge logic routing from Policy Agent to resolution."""
     if state.get("technical_error"):
         return "escalate"
-        
+
     return state.get("next_agent", "escalate")
+
+def route_from_execution(state: AgentState) -> str:
+    """Conditional Edge logic routing from Execution Agent.
+
+    Execution can fail after Supervisor/Policy already routed here, setting
+    technical_error + next_agent="escalate" in its except block — without
+    this check that signal was written to state but never read, so the
+    graph fell straight through to END and no human was ever notified.
+    """
+    if state.get("technical_error"):
+        return "escalate"
+
+    return "end"
 
 def get_workflow() -> StateGraph:
     """Builds and returns the uncompiled StateGraph for Aether ITSM Multi-Agent Swarm."""
@@ -52,8 +65,17 @@ def get_workflow() -> StateGraph:
         }
     )
     
+    # Routing from Execution Agent (may fail and need to escalate instead of ending)
+    workflow.add_conditional_edges(
+        "execution",
+        route_from_execution,
+        {
+            "escalate": "escalate",
+            "end": END
+        }
+    )
+
     # Terminal nodes
-    workflow.add_edge("execution", END)
     workflow.add_edge("draft_plan", END)
     workflow.add_edge("escalate", END)
     

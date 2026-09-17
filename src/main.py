@@ -25,6 +25,26 @@ settings = get_settings()
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
 
+
+def _ensure_schema_migrations():
+    """
+    Best-effort ALTER TABLE for columns added after create_all() already ran
+    once on an existing dev DB. There's no Alembic in this project yet, so
+    this keeps existing SQLite/Postgres databases working without a manual
+    step. Safe to run on every startup: failures mean the column already
+    exists.
+    """
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE companies ADD COLUMN api_key_hash VARCHAR"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+
+_ensure_schema_migrations()
+
 def seed_database():
     from src.db.database import SessionLocal
     from src.auth.service import get_password_hash

@@ -1,19 +1,34 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from src.db.database import get_db
 from src.db.models import User, Company, Ticket
 from src.security.deps import get_current_user
 from src.security.jwt import create_access_token
 from src.security.encryption import encrypt_token, decrypt_token
+from src.security.cookies import set_auth_cookie
+import re
 
 router = APIRouter(prefix="/tenant", tags=["tenant"])
+
+# Only "owner/repo" — this value is interpolated straight into a GitHub API URL,
+# so it must never contain path separators, "..", or scheme/host characters.
+GITHUB_REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def _validate_github_repo(v: Optional[str]) -> Optional[str]:
+    if v and not GITHUB_REPO_PATTERN.match(v):
+        raise ValueError("github_repo must be in the form 'owner/repo'")
+    return v
+
 
 class OnboardingPayload(BaseModel):
     llm_engine: str
     github_token: str
     github_repo: str
+
+    _validate_repo = field_validator("github_repo")(_validate_github_repo)
 
 @router.post("/onboarding")
 def complete_onboarding(payload: OnboardingPayload, response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -42,16 +57,8 @@ def complete_onboarding(payload: OnboardingPayload, response: Response, db: Sess
     }
     
     access_token = create_access_token(data=token_data)
-    
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=True, 
-        samesite="lax",
-        max_age=24 * 60 * 60 # 24 hours
-    )
-    
+    set_auth_cookie(response, access_token)
+
     return {
         "status": "success", 
         "message": "Tenant onboarding completed."
@@ -65,11 +72,20 @@ def get_tenant_settings(db: Session = Depends(get_db), current_user: User = Depe
     company = db.query(Company).filter(Company.id == current_user.company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found.")
-        
+
+    # api_key is stored encrypted (Fernet); decrypt only here, for the owning
+    # tenant, to redisplay it. A None result means it's a pre-hardening row
+    # that still holds the raw value — fall back to it as-is.
+    displayed_api_key = None
+    if company.api_key:
+        displayed_api_key = decrypt_token(company.api_key)
+        if displayed_api_key is None:
+            displayed_api_key = company.api_key
+
     return {
         "github_token": "MASKED" if company.github_token else "",
         "github_repo": company.github_repo,
-        "api_key": company.api_key,
+        "api_key": displayed_api_key,
         "webhook_url": company.webhook_url,
         "mcp_server_url": company.mcp_server_url,
         "llm_engine": company.llm_engine,
@@ -85,6 +101,8 @@ class UpdateSettingsPayload(BaseModel):
     llm_engine: Optional[str] = None
     user_full_name: Optional[str] = None
     company_name: Optional[str] = None
+
+    _validate_repo = field_validator("github_repo")(_validate_github_repo)
 
 @router.put("/settings")
 def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

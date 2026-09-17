@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 24  # 24 hours
     superadmin_password: str = Field(..., description="Password for the initial superadmin account")
     encryption_key: str = Field(..., description="Secret key for encrypting integration tokens")
+    cookie_secure: bool = Field(
+        default=False,
+        description="Send the auth cookie with the Secure flag (requires HTTPS). Set True in production.",
+    )
 
     # ── Database ──
     database_url: str = Field(

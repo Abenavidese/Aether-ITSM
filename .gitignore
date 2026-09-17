@@ -47,3 +47,8 @@ venv.bak/
 
 # MacOS
 .DS_Store
+
+# Local databases (contain password hashes, tenant data, agent checkpoints — never commit)
+*.db
+*.db-journal
+temp_uploads/

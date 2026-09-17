@@ -1,19 +1,61 @@
 import json
 import logging
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from .state import AgentState, ClassificationResult, ExecutionPlanResult, PolicyCheckResult
 from src.config import get_llms
 from src.rag.service import retrieve_context
 
 logger = logging.getLogger(__name__)
 
+MAX_STRUCTURED_RETRIES = 2
+
+
+async def _invoke_structured(llm, schema, messages: list, max_retries: int = MAX_STRUCTURED_RETRIES):
+    """
+    Invokes an LLM for structured output, self-correcting up to `max_retries`
+    times when the model (notably a local Ollama model) returns JSON that
+    fails schema validation instead of raising immediately.
+
+    Uses include_raw=True so a failed parse comes back as data
+    ({"parsed": None, "parsing_error": ...}) rather than an exception,
+    which lets us feed the error back to the model and ask it to fix its
+    own output before giving up. Callers should still wrap this in a
+    try/except to fall back to a safe default (e.g. escalate) once all
+    attempts are exhausted.
+    """
+    structured_llm = llm.with_structured_output(schema, include_raw=True)
+    current_messages = list(messages)
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        raw_result = await structured_llm.ainvoke(current_messages)
+        parsed = raw_result.get("parsed")
+        if parsed is not None:
+            return parsed
+
+        last_error = raw_result.get("parsing_error")
+        logger.warning(
+            "Structured output for %s failed schema validation (attempt %d/%d): %s",
+            schema.__name__, attempt + 1, max_retries + 1, last_error
+        )
+        current_messages = current_messages + [
+            HumanMessage(content=(
+                f"Your previous response was not valid JSON for the '{schema.__name__}' "
+                f"schema. Error: {last_error}. Respond again with ONLY a JSON object "
+                "matching every required field of the schema."
+            ))
+        ]
+
+    raise ValueError(
+        f"Structured output for {schema.__name__} failed after {max_retries + 1} attempts: {last_error}"
+    )
+
 async def supervisor_node(state: AgentState) -> dict:
     """Node 1: Supervisor - Evaluates ticket, assigns Risk Level, and routes to next sub-agent."""
     logger.info("Supervisor Agent analyzing Ticket: %s", state.get('ticket_id'))
     
     llm_nano, _ = get_llms()
-    structured_llm = llm_nano.with_structured_output(ClassificationResult)
-    
+
     prompt = f"""
     You are the Supervisor Agent for Aether ITSM.
     Analyze the user's IT support ticket and route it.
@@ -30,8 +72,8 @@ async def supervisor_node(state: AgentState) -> dict:
     messages = [SystemMessage(content=prompt)] + state["messages"]
     
     try:
-        result: ClassificationResult = await structured_llm.ainvoke(messages)
-        
+        result: ClassificationResult = await _invoke_structured(llm_nano, ClassificationResult, messages)
+
         # Swarm Routing Logic
         next_ag = "escalate"
         if result.risk_level == 0:
@@ -55,8 +97,7 @@ async def policy_agent_node(state: AgentState) -> dict:
     logger.info("Policy Agent evaluating compliance for Risk Level %s", state.get('assessed_risk'))
     
     _, llm_super = get_llms()
-    structured_llm = llm_super.with_structured_output(PolicyCheckResult)
-    
+
     user_query = state["messages"][-1].content if state["messages"] else ""
     tenant_id = state.get("user_context", {}).get("tenant_id")
     
@@ -79,8 +120,8 @@ async def policy_agent_node(state: AgentState) -> dict:
     messages = [SystemMessage(content=prompt)] + state["messages"]
     
     try:
-        result: PolicyCheckResult = await structured_llm.ainvoke(messages)
-        
+        result: PolicyCheckResult = await _invoke_structured(llm_super, PolicyCheckResult, messages)
+
         # Route based on compliance and risk
         if not result.is_compliant:
             next_ag = "escalate"
@@ -105,7 +146,6 @@ async def execution_agent_node(state: AgentState) -> dict:
     logger.info("Execution Agent running for Ticket: %s", state.get('ticket_id'))
     
     _, llm_super = get_llms()
-    structured_llm = llm_super.with_structured_output(ExecutionPlanResult)
     user_query = state["messages"][-1].content if state["messages"] else ""
     tenant_id = state.get("user_context", {}).get("tenant_id")
     
@@ -132,7 +172,7 @@ async def execution_agent_node(state: AgentState) -> dict:
     messages = [SystemMessage(content=prompt)] + state["messages"]
     
     try:
-        result: ExecutionPlanResult = await structured_llm.ainvoke(messages)
+        result: ExecutionPlanResult = await _invoke_structured(llm_super, ExecutionPlanResult, messages)
         final_res = f"Action Executed: {result.resolution_summary}"
         return {"final_resolution": final_res}
     except Exception as e:
@@ -145,12 +185,11 @@ async def draft_plan_node(state: AgentState) -> dict:
     logger.info("Execution Agent drafting plan (Risk 3) - Preparing for Human Pause")
     
     _, llm_super = get_llms()
-    structured_llm = llm_super.with_structured_output(ExecutionPlanResult)
     prompt = "You are the Execution Agent. The ticket is Risk 3 and has passed Compliance. Draft a proposed_plan for human review. DO NOT execute."
     messages = [SystemMessage(content=prompt)] + state["messages"]
-    
+
     try:
-        result: ExecutionPlanResult = await structured_llm.ainvoke(messages)
+        result: ExecutionPlanResult = await _invoke_structured(llm_super, ExecutionPlanResult, messages)
         return {"proposed_plan": result.proposed_plan}
     except Exception as e:
         logger.error("Draft plan failed: %s", e, exc_info=True)
