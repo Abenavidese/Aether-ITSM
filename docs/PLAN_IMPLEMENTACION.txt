@@ -89,9 +89,17 @@ completamente desconectado del grafo.
 2.3 [DONE] call_tool() rechaza cualquier tool_name no registrado (ValueError),
         y cualquier fallo de la llamada MCP cae en el except existente de
         execution_agent_node -> technical_error=True -> escalate_node.
-2.4 [ ] Actualizar docs/security_guardrails.md si el mecanismo real de
-        invocacion difiere de lo ya documentado (statu quo: mantenerlo
-        honesto con lo que el codigo realmente hace).
+2.4 [DONE] docs/security_guardrails.md y docs/architecture.md actualizados:
+        cada control tiene un marcador Implemented/Planned que refleja el
+        codigo real, no el diseno aspiracional. Puntos clave: MCP + Strict
+        Schema Validation = Implemented; OpenShell sandboxing = Planned, no
+        implementado (el subproceso de mcp_server.py corre sin aislamiento
+        real hoy); Risk Matrix Enforcement = Implemented (risk_policy.py);
+        "cryptographically signed webhook" de aprobacion = NO implementado,
+        hoy es auth por cookie de sesion + rol, se aclaro la diferencia.
+        Nombres de nodos en architecture.md corregidos para matchear
+        src/agent/graph.py (supervisor/policy/execution/draft_plan/escalate,
+        no los nombres viejos classify_node/auto_execute_node/etc).
 2.5 [DONE] Hallazgo real durante la validacion E2E (no hipotetico): con MCP
         conectado de verdad, una mala clasificacion del modelo local dejo
         pasar un ticket de "AWS Admin/IAM" como riesgo bajo y
@@ -112,21 +120,29 @@ el github_token ya cifrado, el patron de llamada HTTP que ya existe en
 GET /tenant/test-github, y una columna del modelo que existe hace rato
 sin usarse (Ticket.github_issue_url).
 
-3.1 [ ] Tool nueva: create_github_issue(repo, token, title, body) -> URL
-        del issue creado. Puede vivir como tool de mcp_server.py o como
-        una funcion directa en src/tools/ si no necesita pasar por MCP.
-3.2 [ ] Enganchar la creacion del issue en escalate_node (o inmediatamente
-        despues, en run_agent_background) cuando el ticket termina
-        escalado - titulo = resumen del ticket, cuerpo = descripcion +
-        razon de escalamiento + notas de compliance si aplica.
-3.3 [ ] Guardar la URL resultante en Ticket.github_issue_url al sincronizar
-        el estado (ya existe _sync_ticket_from_snapshot en routes.py, se
-        extiende ahi).
-3.4 [ ] Verificar que el dashboard ya muestra el link (ticket_stream en
-        tenant/router.py ya incluye github_issue_url, solo falta que deje
-        de ser siempre null).
-3.5 [ ] Decidir que pasa si la empresa no configuro github_token/repo
-        todavia (fallback: escalar sin issue, no romper el flujo).
+3.1 [DONE] src/integrations/github.py nuevo: create_issue(repo, token, title,
+        body) -> URL, y get_repo_info(repo, token) (compartida con
+        /tenant/test-github, que antes tenia su propio httpx duplicado - se
+        refactorizo para usar el mismo cliente). Deliberadamente NO es una
+        tool de mcp_server.py: crear el issue es una accion determinista del
+        sistema cuando el ticket escala, no algo que el LLM deba "decidir"
+        via tool_name (mismo principio que el piso de riesgo del punto 2.5).
+3.2 [DONE] Enganchado en _sync_ticket_from_snapshot (src/api/routes.py), que
+        ahora es async: cuando el ticket queda "escalated" llama a
+        _create_escalation_issue() - titulo = titulo del ticket, cuerpo =
+        descripcion + razon de escalamiento (final_resolution) + notas de
+        compliance.
+3.3 [DONE] Ticket.github_issue_url se guarda ahi mismo, dentro del mismo
+        commit de sincronizacion del estado.
+3.4 [DONE] El dashboard ya lo mostraba (ticket_stream en tenant/router.py),
+        solo faltaba que dejara de ser siempre null - confirmado.
+3.5 [DONE] _create_escalation_issue nunca lanza excepcion hacia arriba: sin
+        github_token/repo configurado, o si el token no desencripta, o si la
+        llamada a GitHub falla -> retorna None y el ticket igual queda
+        marcado "escalated" normalmente. Probado explicitamente con un
+        Company sin GitHub configurado (retorna None) y uno con GitHub
+        mockeado (retorna la URL real). Corrida E2E completa de regresion
+        despues de este cambio: las 6 fases del script siguen en verde.
 
 
 FASE 4 - TOOL DE ESTADO DE SERVIDOR/SERVICIO

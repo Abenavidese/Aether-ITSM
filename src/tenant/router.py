@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, field_validator
@@ -8,7 +9,10 @@ from src.security.deps import get_current_user
 from src.security.jwt import create_access_token
 from src.security.encryption import encrypt_token, decrypt_token
 from src.security.cookies import set_auth_cookie
+from src.integrations.github import get_repo_info
 import re
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tenant", tags=["tenant"])
 
@@ -129,58 +133,34 @@ def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends
     
     return {"status": "success", "message": "Settings updated"}
 
-import httpx
-
 @router.get("/test-github")
 async def test_github_connection(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    print(f"--- TESTING GITHUB CONNECTION FOR USER {current_user.email} ---")
     if current_user.role not in ["superadmin", "admin"]:
-        print("Error: User is not an admin.")
         raise HTTPException(status_code=403, detail="Not authorized.")
-        
+
     company = db.query(Company).filter(Company.id == current_user.company_id).first()
     if not company:
-        print("Error: Company not found.")
         raise HTTPException(status_code=404, detail="Company not found.")
-        
-    print(f"Company Token: {'SET' if company.github_token else 'MISSING'}")
-    print(f"Company Repo: {company.github_repo or 'MISSING'}")
-        
+
     if not company.github_token or not company.github_repo:
         raise HTTPException(status_code=400, detail="GitHub credentials not configured.")
-        
+
     decrypted_token = decrypt_token(company.github_token)
     if not decrypted_token:
-        print("Error: Could not decrypt token (maybe it's an old plaintext token?)")
         raise HTTPException(status_code=400, detail="Invalid or old token. Please re-enter your GitHub token in Settings.")
 
-    headers = {
-        "Authorization": f"Bearer {decrypted_token}",
-        "Accept": "application/vnd.github.v3+json"
+    try:
+        repo_data = await get_repo_info(company.github_repo, decrypted_token)
+    except RuntimeError as e:
+        logger.warning("GitHub connection test failed for company %s: %s", company.id, e)
+        raise HTTPException(status_code=400, detail=f"Failed to connect: {e}")
+
+    return {
+        "status": "success",
+        "message": f"Successfully connected to {repo_data['full_name']}!",
+        "stars": repo_data.get("stargazers_count", 0),
+        "open_issues": repo_data.get("open_issues_count", 0)
     }
-    
-    url = f"https://api.github.com/repos/{company.github_repo}"
-    print(f"Sending GET request to: {url}")
-    
-    # Try fetching the repo asynchronously
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=headers)
-    
-    print(f"GitHub API Response Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        repo_data = response.json()
-        print("Success! Connection established.")
-        return {
-            "status": "success",
-            "message": f"Successfully connected to {repo_data['full_name']}!",
-            "stars": repo_data.get("stargazers_count", 0),
-            "open_issues": repo_data.get("open_issues_count", 0)
-        }
-    else:
-        error_msg = response.json().get('message', 'Unknown error')
-        print(f"GitHub API Error: {error_msg}")
-        raise HTTPException(status_code=400, detail=f"Failed to connect: {error_msg}")
 
 @router.get("/dashboard")
 def get_dashboard_metrics(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

@@ -9,8 +9,9 @@ from src.db.database import get_db, SessionLocal
 from src.db.models import Company, User, Ticket
 from src.security.deps import get_current_user
 from src.security.api_keys import hash_api_key
-from src.security.encryption import encrypt_token
+from src.security.encryption import encrypt_token, decrypt_token
 from src.security.limiter import limiter
+from src.integrations.github import create_issue
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -50,7 +51,45 @@ def _is_escalated(values: dict) -> bool:
     )
 
 
-def _sync_ticket_from_snapshot(db: Session, ticket: Ticket, snapshot) -> None:
+async def _create_escalation_issue(db: Session, ticket: Ticket, values: dict) -> str | None:
+    """
+    Creates a GitHub Issue for an escalated ticket so the engineering team
+    gets a real, actionable artifact — not just a status flag nobody looks
+    at. Deliberately NOT an LLM-decided action (no tool_name for this in
+    ExecutionPlanResult): escalation always creates an issue when GitHub is
+    configured, regardless of what any node "decided" to do.
+
+    Returns None (never raises) whenever an issue can't be created — a
+    tenant that hasn't connected GitHub yet, an expired/undecryptable
+    token, or a GitHub API failure must never block the ticket from being
+    marked escalated.
+    """
+    company = db.query(Company).filter(Company.id == ticket.tenant_id).first()
+    if not company or not company.github_token or not company.github_repo:
+        return None
+
+    token = decrypt_token(company.github_token)
+    if not token:
+        logger.warning("Could not decrypt github_token for company %s; skipping issue creation", ticket.tenant_id)
+        return None
+
+    reason = values.get("final_resolution") or "Escalated by Aether ITSM"
+    title = f"[Aether] {ticket.title}"
+    body = (
+        f"**Ticket:** {ticket.external_id}\n\n"
+        f"**Description:**\n{ticket.description}\n\n"
+        f"**Escalation reason:** {reason}\n"
+        f"**Compliance notes:** {values.get('compliance_notes') or 'N/A'}\n"
+    )
+
+    try:
+        return await create_issue(company.github_repo, token, title, body)
+    except Exception as e:
+        logger.error("Failed to create GitHub issue for ticket %s: %s", ticket.external_id, e, exc_info=True)
+        return None
+
+
+async def _sync_ticket_from_snapshot(db: Session, ticket: Ticket, snapshot) -> None:
     """Reflects the graph's final (or paused) state onto the persisted Ticket row."""
     if snapshot is None:
         return
@@ -66,6 +105,7 @@ def _sync_ticket_from_snapshot(db: Session, ticket: Ticket, snapshot) -> None:
     if _is_escalated(values):
         ticket.status = "escalated"
         ticket.resolution_path = None
+        ticket.github_issue_url = await _create_escalation_issue(db, ticket, values)
     else:
         ticket.status = "resolved"
         ticket.resolution_path = "human" if values.get("human_approved") is True else "autonomous"
@@ -121,7 +161,7 @@ async def run_agent_background(payload: TicketPayload, company_id: str, ticket_i
         snapshot = await app.aget_state(config)
         ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
         if ticket:
-            _sync_ticket_from_snapshot(db, ticket, snapshot)
+            await _sync_ticket_from_snapshot(db, ticket, snapshot)
 
     except Exception as e:
         logger.error("Failed executing graph: %s", e, exc_info=True)
@@ -299,7 +339,7 @@ async def approve_ticket(
         Ticket.tenant_id == current_user.company_id, Ticket.external_id == ticket_id
     ).first()
     if ticket:
-        _sync_ticket_from_snapshot(db, ticket, final_snapshot)
+        await _sync_ticket_from_snapshot(db, ticket, final_snapshot)
 
     if payload.approved:
         return {"status": "Resumed", "message": "Plan approved and executed."}
