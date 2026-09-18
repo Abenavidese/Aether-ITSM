@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 from typing import List
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -7,13 +8,26 @@ from langchain_core.documents import Document
 from src.rag.embeddings import get_embeddings
 from src.config import get_settings
 
+@lru_cache(maxsize=1)
 def get_vector_store() -> PGVector:
-    """Initialize and return the PGVector store instance."""
+    """
+    Returns a process-wide singleton PGVector store.
+
+    PGVector opens its own SQLAlchemy engine/connection pool internally when
+    constructed — this used to be called fresh on every single
+    retrieve_context/ingest call (twice per Concierge chat turn alone:
+    company_policy + technical_repo), leaking a new pool each time with
+    nothing ever disposing the old ones. Against a connection-limited
+    Postgres (e.g. Supabase's pooler), that leak eventually exhausts
+    available connections and every subsequent RAG call blocks for minutes
+    waiting for one — this is the fix for exactly that symptom, found live
+    during a chat session that got slower with every turn.
+    """
     settings = get_settings()
     db_url = settings.database_url
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
-        
+
     return PGVector(
         embeddings=get_embeddings(),
         collection_name="tenant_knowledge",
