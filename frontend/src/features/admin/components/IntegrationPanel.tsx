@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { KeyRound, Webhook, Link2, Copy, CheckCircle2, GitBranch, Loader2, Activity, Plus, Trash2 } from 'lucide-react';
+import { KeyRound, Webhook, Link2, Copy, CheckCircle2, GitBranch, Loader2, Activity, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
 import { config } from '../../../config';
 
 type MonitoredService = { name: string; url: string };
@@ -11,6 +11,7 @@ export function IntegrationPanel() {
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<{status: 'success' | 'error', message: string} | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [showToken, setShowToken] = useState(false);
   const [editForm, setEditForm] = useState({ github_token: '', github_user: '', github_repo_name: '' });
   const [services, setServices] = useState<MonitoredService[]>([]);
   const [isEditingServices, setIsEditingServices] = useState(false);
@@ -33,7 +34,12 @@ export function IntegrationPanel() {
         }
         
         setEditForm({
-          github_token: data.github_token || '',
+          // Never prefill from data.github_token — the backend deliberately
+          // sends the literal string "MASKED" there, never the real
+          // decrypted value (unlike api_key), so this field must always
+          // start blank and only overwrite the stored token when the admin
+          // actually types a new one (see handleSaveSettings).
+          github_token: '',
           github_user: user,
           github_repo_name: repo
         });
@@ -58,7 +64,14 @@ export function IntegrationPanel() {
 
   const handleSaveSettings = async () => {
     setTestResult(null);
-    const body: Record<string, string> = { github_token: editForm.github_token };
+    const body: Record<string, string> = {};
+    // Blank means "leave the stored token as-is" — the field never gets
+    // prefilled with the real value (see fetchSettings), so an empty string
+    // here means the admin didn't intend to change it, not that they want
+    // to wipe it out.
+    if (editForm.github_token.trim()) {
+      body.github_token = editForm.github_token;
+    }
     // Only send github_repo when both halves are actually filled — sending
     // "/" (both empty) or "owner/" (one empty) always 422s server-side
     // (GITHUB_REPO_PATTERN in src/tenant/router.py), which used to silently
@@ -211,13 +224,23 @@ export function IntegrationPanel() {
             <div>
               <label className="text-xs text-slate-500 font-medium mb-1.5 block">Access Token</label>
               {isEditing ? (
-                <input 
-                  type="password" 
-                  value={editForm.github_token}
-                  onChange={(e) => setEditForm({...editForm, github_token: e.target.value})}
-                  className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg px-4 py-2.5 text-slate-300 text-sm focus:outline-none"
-                  placeholder="ghp_..."
-                />
+                <div className="relative">
+                  <input
+                    type={showToken ? 'text' : 'password'}
+                    value={editForm.github_token}
+                    onChange={(e) => setEditForm({...editForm, github_token: e.target.value})}
+                    className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg pl-4 pr-10 py-2.5 text-slate-300 text-sm focus:outline-none"
+                    placeholder={settings.github_token ? 'Leave blank to keep the current token' : 'ghp_...'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowToken(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                    tabIndex={-1}
+                  >
+                    {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               ) : (
                 <div className="bg-slate-900 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-300 font-mono text-sm opacity-80">
                   {settings.github_token ? 'ghp_••••••••••••••••••••' : 'Not configured'}
