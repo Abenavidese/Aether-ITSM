@@ -106,10 +106,33 @@ async def _directory_listing_context(tenant_id: str, query: str) -> str:
         return ""
 
     keywords = _extract_keywords(query)
-    matched_dir = next(
-        (e["path"] for e in tree if e["type"] == "dir" and e["path"].rsplit("/", 1)[-1].lower() in keywords),
-        None,
-    )
+    dir_basenames = {e["path"].rsplit("/", 1)[-1].lower(): e["path"] for e in tree if e["type"] == "dir"}
+
+    matched_dir = next((dir_basenames[k] for k in keywords if k in dir_basenames), None)
+    if not matched_dir:
+        # Typo tolerance ("ontrollers", "controlers") — a real user typing
+        # from memory into a chat box will misspell a folder name, and
+        # falling back to "nothing matched" every time that happens is
+        # unhelpful even though it's honest. difflib needs no extra
+        # dependency and is good enough for short identifier-like names.
+        import difflib
+        best_score, best_dir = 0.0, None
+        for keyword in keywords:
+            for basename, full_path in dir_basenames.items():
+                if keyword in basename or basename in keyword:
+                    # A direct substring hit (e.g. "ontrollers" missing the
+                    # leading 'c' of "controllers") is a stronger, more
+                    # specific signal than two same-length words that merely
+                    # look alike (e.g. "backjend" vs "backend") — score it
+                    # above any plausible SequenceMatcher ratio between two
+                    # genuinely different short words.
+                    score = 0.97
+                else:
+                    score = difflib.SequenceMatcher(None, keyword, basename).ratio()
+                if score > best_score:
+                    best_score, best_dir = score, full_path
+        if best_score >= 0.75:
+            matched_dir = best_dir
 
     if matched_dir:
         children = sorted(
