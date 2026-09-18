@@ -57,24 +57,31 @@ export function IntegrationPanel() {
   };
 
   const handleSaveSettings = async () => {
+    setTestResult(null);
+    const body: Record<string, string> = { github_token: editForm.github_token };
+    // Only send github_repo when both halves are actually filled — sending
+    // "/" (both empty) or "owner/" (one empty) always 422s server-side
+    // (GITHUB_REPO_PATTERN in src/tenant/router.py), which used to silently
+    // reject the WHOLE save, token included, with nothing shown to the user.
+    if (editForm.github_user.trim() && editForm.github_repo_name.trim()) {
+      body.github_repo = `${editForm.github_user}/${editForm.github_repo_name}`;
+    }
     try {
       const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
         method: 'PUT',
         credentials: 'include',
-        headers: {
-                    'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          github_token: editForm.github_token,
-          github_repo: `${editForm.github_user}/${editForm.github_repo_name}`
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
       });
       if (res.ok) {
         setIsEditing(false);
         fetchSettings(); // Refresh
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setTestResult({ status: 'error', message: data.detail || 'Failed to save settings.' });
       }
     } catch (err) {
-      console.error(err);
+      setTestResult({ status: 'error', message: 'Failed to reach backend' });
     }
   };
 
@@ -167,7 +174,7 @@ export function IntegrationPanel() {
             Aether is configured to escalate unresolvable tickets to your GitHub repository automatically.
           </p>
           
-          {testResult && !isEditing && (
+          {testResult && (
             <div className={`p-4 rounded-lg mb-6 text-sm flex items-center gap-2 ${testResult.status === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'}`}>
               {testResult.status === 'success' ? <CheckCircle2 size={16} /> : <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}
               {testResult.message}
