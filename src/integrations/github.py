@@ -64,6 +64,46 @@ async def search_code(repo: str, token: str, query: str, max_results: int = 3) -
     return [{"path": item["path"], "url": item["html_url"]} for item in items]
 
 
+async def get_repo_tree(repo: str, token: str) -> list[dict]:
+    """
+    Returns a flat listing of every file/directory path in `repo`'s default
+    branch, via GitHub's recursive git-trees API (one call for the whole
+    structure). This is a DIFFERENT capability from search_code: that one
+    finds files whose CONTENT matches a text query, it cannot enumerate a
+    directory — and unlike the plain Contents API (one call per exact path),
+    a flat tree lets a caller find "the controllers folder" without already
+    knowing its full path, which varies per repo.
+
+    Before this existed, a "list the files in controllers/" request had no
+    real tool behind it at all, and a local model answered anyway by
+    fabricating plausible-looking filenames instead of saying it couldn't
+    check — see concierge.py's anti-hallucination instruction, added
+    specifically because of that failure mode.
+
+    Same secrets-never-reach-the-LLM principle as search_code: repo/token
+    are fetched/decrypted server-side, never something the agent supplies.
+    """
+    repo_info = await get_repo_info(repo, token)
+    default_branch = repo_info.get("default_branch", "main")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{GITHUB_API_BASE}/repos/{repo}/git/trees/{default_branch}",
+            headers=_headers(token),
+            params={"recursive": "1"},
+        )
+
+    if response.status_code != 200:
+        message = response.json().get("message", response.text)
+        raise RuntimeError(f"GitHub tree lookup failed ({response.status_code}): {message}")
+
+    data = response.json()
+    return [
+        {"path": item["path"], "type": "dir" if item["type"] == "tree" else "file"}
+        for item in data.get("tree", [])
+    ]
+
+
 async def create_issue(repo: str, token: str, title: str, body: str) -> str:
     """Creates an issue in `repo` (format 'owner/repo') and returns its HTML URL."""
     async with httpx.AsyncClient() as client:

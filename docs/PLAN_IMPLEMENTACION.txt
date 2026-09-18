@@ -294,6 +294,41 @@ una revision tecnica a fondo ni un escenario de carga real.
         cobrar por plan mas adelante.
 
 
+BUGFIX POST-FASE 6: ALUCINACION DEL CONCIERGE EN PREGUNTAS DE CODIGO/ARCHIVOS
+-----------------------------------------------------------
+Encontrado con Ollama real (no hipotetico): al preguntar "revisa el codigo
+del repo y mira si hay errores" el modelo respondio con total confianza
+"no encontre errores"; al preguntar "listame los archivos en controllers"
+directamente invento nombres de archivo (rateLimiter.js, verifyTokenAdmin.js...)
+que no existen en el repo real.
+
+Causa raiz doble:
+1. No existia NINGUNA capacidad para enumerar un directorio - search_code
+   (Fase 6) busca CONTENIDO que matchee un texto, no puede listar una
+   carpeta. Un mensaje tipo "listame los archivos" ni siquiera disparaba
+   _CODE_QUESTION_PATTERN (no menciona "codigo"/"repo"), asi que el LLM
+   respondio sin ningun dato real.
+2. El prompt del Concierge no prohibia inventar cuando no hay contexto real.
+
+Fix (src/integrations/github.py + src/agent/concierge.py):
+- get_repo_tree(repo, token): un solo call a la API recursiva de git trees
+  de GitHub (no la API de Contents, que exige ya saber el path exacto) -
+  devuelve el arbol completo del repo, asi el agente puede encontrar "la
+  carpeta controllers" sin conocer de antemano su path completo.
+- _DIRECTORY_QUESTION_PATTERN + _extract_keywords: heuristica separada de
+  la de busqueda de codigo, matchea sobre los ultimos 3 mensajes (no solo
+  el actual) para capturar seguimientos cortos tipo "y en middleware?" que
+  no tienen palabra disparadora propia.
+- Instruccion CRITICAL explicita en el prompt: solo afirmar lo que aparece
+  literalmente en el contexto o en un resultado real de tool: nada de
+  "revise el codigo" o inventar archivos sin datos reales detras.
+- Verificado contra el repo real (Abenavidese/core-ecommerce-api, no un
+  mock): _directory_listing_context('...controllers...') y
+  ('...middleware?') devolvieron exactamente los archivos reales
+  (authController.js/cartController.js/orderController.js/productController.js
+  y auth.js/errorHandler.js/wrap.js respectivamente). Suite pytest: 7/7.
+
+
 ESTADO AL CIERRE DE ESTA SESION
 -----------------------------------------------------------
 Fases 0-7 y 8.1 completas y verificadas con ejecucion real (pytest 7/7

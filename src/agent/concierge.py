@@ -20,7 +20,7 @@ from .structured_output import invoke_structured
 from src.config import get_llms
 from src.db.database import SessionLocal
 from src.db.models import Company
-from src.integrations.github import search_code
+from src.integrations.github import get_repo_tree, search_code
 from src.integrations.monitoring import get_monitored_services
 from src.rag.service import retrieve_context
 
@@ -36,6 +36,26 @@ _CODE_QUESTION_PATTERN = re.compile(
     r"\b(code|repo(sitory)?|function|c[oó]digo|repositorio|funci[oó]n|commit|pull request|\bpr\b|bug in|error de compilaci[oó]n)\b",
     re.IGNORECASE,
 )
+
+# Distinct from _CODE_QUESTION_PATTERN: "search code content" vs "enumerate a
+# folder" are different GitHub API calls (search_code vs get_repo_tree) and
+# need different trigger words — "list the files in X" rarely says "code".
+_DIRECTORY_QUESTION_PATTERN = re.compile(
+    r"\b(list(a(me)?)?|archivos|files|folder|carpeta|directorio|directory|estructura|structure)\b",
+    re.IGNORECASE,
+)
+
+_STOPWORDS = {
+    "el", "la", "los", "las", "en", "de", "que", "hay", "todos", "todas", "un", "una",
+    "list", "lista", "listame", "archivos", "files", "todo", "the", "and", "for",
+    "project", "proyecto", "backend", "frontend", "source", "src", "carpeta",
+    "folder", "directorio", "directory", "estructura", "structure", "hola", "por",
+}
+
+
+def _extract_keywords(text: str) -> set[str]:
+    words = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text.lower())
+    return {w for w in words if w not in _STOPWORDS}
 
 
 def _get_github_config(tenant_id: str) -> tuple[str, str] | None:
@@ -69,6 +89,46 @@ async def _code_search_context(tenant_id: str, query: str) -> str:
     return "\n".join(f"- {r['path']} ({r['url']})" for r in results)
 
 
+async def _directory_listing_context(tenant_id: str, query: str) -> str:
+    """
+    Best-effort directory listing (see get_repo_tree's docstring for why
+    this is a separate capability from code search) — never blocks the turn
+    on failure.
+    """
+    github_config = _get_github_config(tenant_id)
+    if not github_config:
+        return ""
+    repo, token = github_config
+    try:
+        tree = await get_repo_tree(repo, token)
+    except Exception as e:
+        logger.warning("Repo tree fetch failed for tenant %s: %s", tenant_id, e)
+        return ""
+
+    keywords = _extract_keywords(query)
+    matched_dir = next(
+        (e["path"] for e in tree if e["type"] == "dir" and e["path"].rsplit("/", 1)[-1].lower() in keywords),
+        None,
+    )
+
+    if matched_dir:
+        children = sorted(
+            e["path"].rsplit("/", 1)[-1]
+            for e in tree
+            if e["path"].rsplit("/", 1)[0] == matched_dir and e["path"] != matched_dir
+        )
+        if children:
+            return f"Real contents of '{matched_dir}/' (from GitHub, just fetched):\n" + "\n".join(f"- {c}" for c in children)
+
+    # No specific folder matched the message's keywords — surface the real
+    # top-level layout instead of nothing, so the model has *something* true
+    # to answer with rather than a reason to guess.
+    top_level = sorted({e["path"].split("/")[0] for e in tree})
+    return "Couldn't match a specific folder name from the message. Real top-level contents of the repo:\n" + "\n".join(
+        f"- {t}" for t in top_level
+    )
+
+
 async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
     logger.info("Concierge handling chat turn for tenant %s", state.get("user_context", {}).get("tenant_id"))
 
@@ -82,9 +142,22 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
     policy_context = retrieve_context(tenant_id, user_query, source_type="company_policy") if tenant_id else ""
     tech_context = retrieve_context(tenant_id, user_query, source_type="technical_repo") if tenant_id else ""
 
+    # A short follow-up like "and in middleware?" carries no trigger word of
+    # its own — it only makes sense after a prior "list the files in X"
+    # message. Checking the last couple of messages (not just this one) for
+    # the *trigger* catches that, while keyword extraction still runs on the
+    # current message alone (it already contains "middleware").
+    recent_text = " ".join(
+        str(m.content) for m in state["messages"][-3:] if isinstance(getattr(m, "content", None), str)
+    )
+
     code_context = ""
     if tenant_id and _CODE_QUESTION_PATTERN.search(user_query):
         code_context = await _code_search_context(tenant_id, user_query)
+
+    directory_context = ""
+    if tenant_id and _DIRECTORY_QUESTION_PATTERN.search(recent_text):
+        directory_context = await _directory_listing_context(tenant_id, user_query)
 
     monitored_services = get_monitored_services(tenant_id) if tenant_id else []
     services_note = ""
@@ -98,12 +171,22 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
     if useful, exactly one of the two safe tools available (query_knowledge_base
     for documented fixes, check_service_status for connectivity/outage checks).
 
+    CRITICAL — never fabricate: only state facts that literally appear in a
+    context section below or in a tool's actual output. You have NO general
+    ability to "review the whole codebase for bugs" and NO memory of this
+    repository beyond what's printed here. If a context section says "None
+    found" or is missing for what the user asked (specific files, code
+    content, whether something has errors), say plainly that you don't have
+    that information / couldn't find it — do NOT invent file names, code, or
+    a review verdict that isn't grounded in real data below.
+
     Company policy context:
     {policy_context or "None found."}
 
     Technical documentation context:
     {tech_context or "None found."}
     {f"Relevant code found in the company repository:\n{code_context}\n" if code_context else ""}
+    {f"Repository directory listing:\n{directory_context}\n" if directory_context else ""}
     {services_note}
     Available tools:
     {mcp_client.prompt_catalog()}
