@@ -54,3 +54,6 @@ venv.bak/
 *.db-shm
 *.db-wal
 temp_uploads/
+
+# Standalone test-fixture app (own project, own repo — not part of Aether)
+core-ecommerce-api/
