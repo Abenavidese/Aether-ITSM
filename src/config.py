@@ -54,11 +54,35 @@ class Settings(BaseSettings):
     openai_model_super: str = "gpt-4o"
     openai_embedding_model: str = "text-embedding-3-small"
 
+    # Limits applied to every LLM call (see get_llms): a structured reply is
+    # a few hundred tokens, so 1024 leaves headroom while bounding a runaway
+    # generation to seconds instead of forever.
+    llm_max_output_tokens: int = 1024
+    llm_timeout_seconds: float = 120.0
+    ollama_num_ctx: int = 8192
+
+    # ── RAG ──
+    # Max cosine distance (0 = identical, 2 = opposite) for a chunk to count
+    # as relevant in retrieve_context(). Calibrated against nomic-embed-text
+    # with task prefixes on the real KB docs (see docs/PLAN_IMPLEMENTACION.txt,
+    # Fase 9): worst relevant top-1 was 0.351, closest unrelated query 0.416.
+    # Re-check it when switching embedding models — distances aren't
+    # comparable across models.
+    rag_max_distance: float = 0.40
+
     nebius_api_key: str | None = None
     openai_api_key: str | None = None
 
     # ── Infrastructure ──
-    checkpoint_db_path: str = Field(default="checkpoints.db", description="Path to LangGraph sqlite memory")
+    checkpoint_backend: str = Field(
+        default="auto",
+        description="auto|sqlite|postgres — auto uses Postgres when DATABASE_URL is Postgres (see src/agent/checkpointer.py)",
+    )
+    checkpoint_db_path: str = Field(default="checkpoints.db", description="Path to LangGraph sqlite memory (sqlite backend only)")
+    checkpoint_pool_max_size: int = Field(
+        default=5,
+        description="Max Postgres connections for the checkpointer pool — keep low, Supabase's pooler caps total connections",
+    )
     
     cors_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173", 
@@ -105,8 +129,20 @@ def get_llms():
     if settings.use_ollama:
         from langchain_ollama import ChatOllama
 
-        llm_nano = ChatOllama(model=settings.ollama_model_nano, temperature=0.0)
-        llm_super = ChatOllama(model=settings.ollama_model_super, temperature=0.0)
+        # Hard limits, found live: without num_predict Ollama's default is
+        # "generate forever", and a model stuck in a repetition loop under
+        # JSON-constrained decoding ran 27k+ tokens (context-shifting its own
+        # window) and froze the chat with no error. num_ctx: Ollama's default
+        # window silently truncates long prompts FROM THE START — i.e. it
+        # drops the system prompt with all the instructions first.
+        ollama_kwargs = dict(
+            temperature=0.0,
+            num_ctx=settings.ollama_num_ctx,
+            num_predict=settings.llm_max_output_tokens,
+            client_kwargs={"timeout": settings.llm_timeout_seconds},
+        )
+        llm_nano = ChatOllama(model=settings.ollama_model_nano, **ollama_kwargs)
+        llm_super = ChatOllama(model=settings.ollama_model_super, **ollama_kwargs)
         return llm_nano, llm_super
 
     from langchain_openai import ChatOpenAI
@@ -124,6 +160,10 @@ def get_llms():
             "NEBIUS_API_KEY or OPENAI_API_KEY is required when USE_OLLAMA=False"
         )
 
-    llm_nano = ChatOpenAI(model=nano_model, temperature=0.0, api_key=api_key, base_url=base_url)
-    llm_super = ChatOpenAI(model=super_model, temperature=0.0, api_key=api_key, base_url=base_url)
+    openai_kwargs = dict(
+        temperature=0.0, api_key=api_key, base_url=base_url,
+        max_tokens=settings.llm_max_output_tokens, timeout=settings.llm_timeout_seconds,
+    )
+    llm_nano = ChatOpenAI(model=nano_model, **openai_kwargs)
+    llm_super = ChatOpenAI(model=super_model, **openai_kwargs)
     return llm_nano, llm_super

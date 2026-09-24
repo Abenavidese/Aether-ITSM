@@ -279,10 +279,21 @@ una revision tecnica a fondo ni un escenario de carga real.
         (commits viejos todavia los tienen) o si se acepta el riesgo dado
         que es un proyecto de portafolio/hackathon sin datos reales de
         clientes en juego.
-8.3 [ ] Migrar el checkpointer de AsyncSqliteSaver a AsyncPostgresSaver
+8.3 [~] Migrar el checkpointer de AsyncSqliteSaver a AsyncPostgresSaver
         antes de probar con multiples tickets concurrentes o multiples
         workers de Uvicorn (SQLite serializa escrituras y no coordina
         entre procesos).
+        IMPLEMENTADO, FALTA E2E: src/agent/checkpointer.py elige backend por
+        DATABASE_URL (CHECKPOINT_BACKEND=auto|sqlite|postgres); Postgres usa
+        AsyncConnectionPool (max CHECKPOINT_POOL_MAX_SIZE=5, prepare_threshold=0
+        por el pooler de Supabase). pytest sigue en sqlite. Verificado: el
+        server arranca contra Supabase y setup() crea las tablas. Hallazgo
+        real: psycopg async NO corre en el ProactorEventLoop de Windows, que
+        uvicorn usa salvo con --reload/--workers -> arrancar con --reload o
+        --loop asyncio:SelectorEventLoop (falla rapido con ese mensaje si
+        no). MCP stdio sigue funcionando en Selector (fallback Popen del SDK).
+        Pendiente: scripts/e2e_ollama.py completo + prueba de concurrencia.
+        Los threads que habia en checkpoints.db no se migran.
 8.4 [ ] La heuristica de ahorro de tiempo/costo en el dashboard es hoy una
         constante fija (15 min / $12.50 por ticket auto-resuelto,
         documentado como placeholder en el codigo) - refinar cuando haya
@@ -327,6 +338,98 @@ Fix (src/integrations/github.py + src/agent/concierge.py):
   ('...middleware?') devolvieron exactamente los archivos reales
   (authController.js/cartController.js/orderController.js/productController.js
   y auth.js/errorHandler.js/wrap.js respectivamente). Suite pytest: 7/7.
+
+
+BUGFIX: CONCIERGE NO ENCONTRABA CARPETAS DEL REPO ("que hay en /src/agents")
+-----------------------------------------------------------
+Encontrado en el chat real: "revisa el repo y dime que hay en /src/agents"
+-> "No encontre informacion". Causa: el mensaje no tenia palabra gatillo de
+directorio (lista/carpeta/archivos), asi que nunca se consulto el arbol; y
+aun si se consultaba, "repo" matcheaba por substring "repositories/" y se
+habria listado la carpeta equivocada. Fix en concierge.py: rutas explicitas
+(_PATH_PATTERN) se resuelven por sufijo ("src/x" -> "backend/src/x"); ruta
+inexistente -> negativa deterministica + contenido real del padre + nombres
+parecidos; el substring solo cuenta si cubre >=80% del nombre; si una
+pregunta de repo no da resultados en search_code, se pasa la estructura
+real. Prompt: responder en el idioma del usuario, y una respuesta negativa
+informativa es resolved=true (no abre ticket). tests/test_concierge_directory.py
+(6 casos) + verificado con Ollama real contra core-ecommerce-api.
+
+
+BUGFIX: EL CHAT SE QUEDABA CONGELADO (LLM GENERANDO SIN FIN)
+-----------------------------------------------------------
+Diagnosticado con el log de Ollama (no hipotetico): una sola llamada llevaba
+27k+ tokens generados ("pero si /src/agents no existe pero si ..."), con
+context shift sin fin. Cadena: (1) ChatOllama sin num_predict -> Ollama
+genera para siempre si el modelo entra en bucle; (2) invoke_structured
+reenviaba el parsing_error completo, que incluye toda la salida basura
+(prompt de 41.878 tokens); (3) Ollama trunca el prompt POR EL PRINCIPIO
+-> se perdia el system prompt y el modelo seguia el bucle. Fix:
+LLM_MAX_OUTPUT_TOKENS=1024, LLM_TIMEOUT_SECONDS=120 (Ollama y OpenAI/Nebius),
+OLLAMA_NUM_CTX=8192 (cabe entero en VRAM, 5.9 GB); el reintento parte de los
+mensajes originales + error resumido a 300 chars. Verificado: la misma
+conversacion que colgaba ahora responde en 17-30s (3/3 corridas).
+Tambien: validador _ungrounded_repo_names en concierge.py (archivos/rutas
+nombrados en la respuesta deben existir en el arbol real o en lo que escribio
+el usuario; si no, un reintento y luego respuesta deterministica) y rutas
+estilo Windows ("\src\agent") reconocidas.
+
+
+CONCIERGE: LECTURA REAL DE ARCHIVOS DEL REPO
+-----------------------------------------------------------
+Problema: el agente solo veia NOMBRES (arbol), nunca el contenido, asi que
+no podia diagnosticar nada; y el listado de "lo que si existe" dependia de
+que el 8B lo copiara (a menudo respondia solo "no existe").
+- get_file_content(repo, token, path) en src/integrations/github.py
+  (Contents API, raw). El path sale del arbol real server-side, nunca del LLM.
+- concierge.py: RepoView (context, listed_dirs, files, fallback). Se leen los
+  archivos nombrados en el mensaje, o los de una carpeta cuando hay intencion
+  de revision (_REVIEW_PATTERN: revisa/errores/explica/que hace...). Nunca los
+  de carpetas mostradas solo como alternativa a una ruta inexistente.
+  Presupuesto 6000 chars / max 4 archivos, con numeros de linea y cabecera
+  explicita "COMPLETE FILE, N lines" / "PARTIAL" (con un marcador condicional
+  "TRUNCATED" el 8B afirmaba que un archivo completo estaba cortado).
+- _verified_listing_footer: si la respuesta omite entradas del listado real,
+  el codigo lo agrega al final. El listado ya no depende del LLM.
+- ConciergeResult.details (list[str]): bajo JSON forzado el modelo cerraba
+  response_text justo en "aqui te explico cada uno:" y la lista se perdia
+  (done_reason=stop, 54 tokens). Ahora los items van en details.
+- Prompt: en revisiones siempre veredicto (problemas con archivo:linea, o
+  "sin errores evidentes" + resumen) y resolved=true.
+Verificado con Ollama real contra core-ecommerce-api: "\src\agent" -> no
+existe + listado real garantizado; middleware -> explicacion correcta de
+auth.js/errorHandler.js/wrap.js; authController.js y server.js -> revision
+con veredicto. 30/30 tests.
+
+
+FASE 9 - RAG: CHUNKING CONTEXTUAL
+-----------------------------------------------------------
+9.1 [DONE] src/rag/chunking.py: chunking por seccion (titulos Markdown,
+        subrayados ----/====, o linea corta aislada en texto plano). Ningun
+        chunk cruza dos secciones y cada uno lleva el encabezado
+        "Documento: <archivo> — <titulo>\nSeccion: <seccion>", embebido y
+        visible para el LLM. PDFs: paginas unidas en un solo texto, cada
+        chunk guarda su pagina en metadata. Sin llamadas al LLM.
+9.2 [DONE] Prefijos de tarea de nomic-embed-text ("search_document: " /
+        "search_query: ") via TaskPrefixedEmbeddings en src/rag/embeddings.py.
+        Solo afectan al vector; el texto guardado queda sin prefijo.
+9.3 [DONE] Umbral de relevancia en retrieve_context (RAG_MAX_DISTANCE=0.40,
+        distancia coseno). Calibrado con datos reales: antes del cambio las
+        distancias relevantes (0.21-0.42) se solapaban con las irrelevantes
+        (0.43-0.59), ningun umbral las separaba; despues, relevantes <=0.351
+        e irrelevantes >=0.416, y el top-1 es la seccion correcta en los 5
+        casos revisados. Muestra chica (12 queries): recalibrar con mas datos
+        o al cambiar de modelo de embeddings.
+9.4 [DONE] Re-subir un archivo reemplaza sus chunks (replace_chunks: agrega
+        los nuevos y despues borra los viejos) en vez de duplicarlos.
+9.5 [DONE] scripts/reindex_rag.py (dry-run por defecto, --apply): 65 chunks
+        viejos de 14 archivos reindexados. Los originales no se guardan
+        tras subirlos, asi que los chunks legacy se re-cortan de su propio
+        texto: tienen encabezado de documento pero solo tienen seccion
+        cuando el titulo cae dentro del chunk. Para secciones completas en
+        user_guide.txt / repo_overview.txt de acme: volver a subirlos.
+9.6 [ ] Opcional, con Nebius: "contextual retrieval" (el LLM escribe el
+        contexto de cada chunk). Con el 8b local haria lenta la subida.
 
 
 ESTADO AL CIERRE DE ESTA SESION

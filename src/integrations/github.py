@@ -104,6 +104,34 @@ async def get_repo_tree(repo: str, token: str) -> list[dict]:
     ]
 
 
+async def get_file_content(repo: str, token: str, path: str) -> str:
+    """
+    Returns the raw text of one file on `repo`'s default branch (Contents API
+    with the raw media type — no base64 round-trip). The directory tree alone
+    only tells the agent a file EXISTS; diagnosing anything ("why does login
+    fail", "is there a bug in authController.js") needs what's inside it.
+
+    Same secrets-never-reach-the-LLM principle as search_code/get_repo_tree:
+    `path` comes from matching the user's message against the real tree
+    server-side, never from the model. The Contents API serves files up to
+    1 MB; callers are expected to budget what they put in a prompt.
+    """
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{GITHUB_API_BASE}/repos/{repo}/contents/{path}",
+            headers={**_headers(token), "Accept": "application/vnd.github.raw+json"},
+        )
+
+    if response.status_code != 200:
+        try:
+            message = response.json().get("message", response.text)
+        except ValueError:
+            message = response.text
+        raise RuntimeError(f"GitHub file fetch failed for '{path}' ({response.status_code}): {message}")
+
+    return response.text
+
+
 async def create_issue(repo: str, token: str, title: str, body: str) -> str:
     """Creates an issue in `repo` (format 'owner/repo') and returns its HTML URL."""
     async with httpx.AsyncClient() as client:

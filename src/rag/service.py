@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 from typing import List
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from src.rag.chunking import chunk_document
 from langchain_postgres import PGVector
 from langchain_core.documents import Document
 from src.rag.embeddings import get_embeddings
@@ -35,74 +35,88 @@ def get_vector_store() -> PGVector:
         use_jsonb=True,
     )
 
-def ingest_file(tenant_id: str, file_path: str, filename: str, source_type: str = "company_policy"):
-    """Loads a file, chunks it, and stores it in the vector database with the tenant_id and source_type."""
-    
-    # Load Document
-    if file_path.lower().endswith('.pdf'):
-        loader = PyPDFLoader(file_path)
-        docs = loader.load()
-    else:
-        # Fallback to TextLoader for TXT or Markdown
-        loader = TextLoader(file_path, encoding='utf-8')
-        docs = loader.load()
-        
-    # Chunking
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        separators=["\n\n", "\n", ".", " ", ""]
-    )
-    splits = text_splitter.split_documents(docs)
-    
-    # Inject metadata for Multi-Tenant Isolation
-    for split in splits:
-        split.metadata["tenant_id"] = tenant_id
-        split.metadata["filename"] = filename
-        split.metadata["source_type"] = source_type
-        
-    # Store in PGVector
+def _load_text(file_path: str) -> tuple[str, list[tuple[int, int]] | None]:
+    """Full document text, plus [(char_offset, page)] for PDFs. Pages are
+    joined into one text so a section (and its chunks) can span a page break
+    instead of being cut at every page like the per-page loader output."""
+    if not file_path.lower().endswith(".pdf"):
+        return TextLoader(file_path, encoding="utf-8").load()[0].page_content, None
+
+    parts, page_offsets, offset = [], [], 0
+    for page_number, page in enumerate(PyPDFLoader(file_path).load(), start=1):
+        page_offsets.append((offset, page_number))
+        parts.append(page.page_content)
+        offset += len(page.page_content) + 2  # the "\n\n" joiner below
+    return "\n\n".join(parts), page_offsets
+
+
+def _existing_chunk_ids(tenant_id: str, filename: str) -> list[str]:
+    from sqlalchemy import text
+    from src.db.database import engine
+    with engine.connect() as conn:
+        try:
+            rows = conn.execute(text("""
+                SELECT id FROM langchain_pg_embedding
+                WHERE cmetadata->>'tenant_id' = :tenant_id AND cmetadata->>'filename' = :filename
+            """), {"tenant_id": tenant_id, "filename": filename}).fetchall()
+        except Exception:
+            return []  # table doesn't exist yet: nothing uploaded so far
+    return [row[0] for row in rows]
+
+
+def replace_chunks(tenant_id: str, filename: str, chunks: List[Document]) -> None:
+    """
+    Stores `chunks` as the ONLY content for (tenant_id, filename). Re-uploading
+    a file used to append a second full copy of it, so every search returned
+    the same passage twice and crowded out other documents. New chunks are
+    added before the old ones are deleted: if embedding fails midway, the
+    previous version is still there instead of the file vanishing.
+    """
+    old_ids = _existing_chunk_ids(tenant_id, filename)
     vector_store = get_vector_store()
-    vector_store.add_documents(splits)
-    
+    vector_store.add_documents(chunks)
+    if old_ids:
+        vector_store.delete(ids=old_ids)
+
+
+def ingest_file(tenant_id: str, file_path: str, filename: str, source_type: str = "company_policy"):
+    """Loads a file, chunks it by section with a context header (see
+    src/rag/chunking.py), and stores it scoped to tenant_id and source_type."""
+    text, page_offsets = _load_text(file_path)
+    chunks = chunk_document(
+        text, filename,
+        base_metadata={"tenant_id": tenant_id, "source_type": source_type},
+        page_offsets=page_offsets,
+    )
+    replace_chunks(tenant_id, filename, chunks)
+
+
 def ingest_text(tenant_id: str, text: str, source_id: str, source_type: str = "ai_feedback"):
     """Chunks and stores raw text directly into the vector database (e.g. for feedback)."""
-    doc = Document(page_content=text)
-    
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", ".", " ", ""]
-    )
-    splits = text_splitter.split_documents([doc])
-    
-    for split in splits:
-        split.metadata["tenant_id"] = tenant_id
-        split.metadata["filename"] = f"Feedback_{source_id}"
-        split.metadata["source_type"] = source_type
-        
-    vector_store = get_vector_store()
-    vector_store.add_documents(splits)
-    
+    filename = f"Feedback_{source_id}"
+    chunks = chunk_document(text, filename, base_metadata={"tenant_id": tenant_id, "source_type": source_type})
+    replace_chunks(tenant_id, filename, chunks)
+
+
 def retrieve_context(tenant_id: str, query: str, source_type: str = "company_policy", top_k: int = 4) -> str:
-    """Retrieves relevant chunks strictly filtered by tenant_id and source_type."""
+    """
+    Retrieves relevant chunks strictly filtered by tenant_id and source_type.
+
+    Chunks farther than RAG_MAX_DISTANCE (cosine distance) are dropped: a
+    plain top-k always returns k chunks even when none is related to the
+    query, and that noise in the prompt is exactly what a local model will
+    confidently build a wrong answer on. Better an honest empty context.
+    """
     vector_store = get_vector_store()
-    
-    # Filter by tenant_id and source_type
-    retriever = vector_store.as_retriever(
-        search_kwargs={
-            "k": top_k,
-            "filter": {"tenant_id": tenant_id, "source_type": source_type}
-        }
+    results = vector_store.similarity_search_with_score(
+        query, k=top_k, filter={"tenant_id": tenant_id, "source_type": source_type}
     )
-    
-    docs = retriever.invoke(query)
-    
+    max_distance = get_settings().rag_max_distance
+    docs = [doc for doc, distance in results if distance <= max_distance]
     if not docs:
         return ""
-        
-    context = "\n\n".join([f"Fragmento ({doc.metadata.get('filename')}):\n{doc.page_content}" for doc in docs])
-    return context
+    # Chunks carry their own "Documento / Sección" header (chunking.py).
+    return "\n\n---\n\n".join(doc.page_content for doc in docs)
     
 def get_uploaded_files(tenant_id: str) -> List[dict]:
     """Returns a list of files with their source_type uploaded by the tenant."""

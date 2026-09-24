@@ -39,7 +39,15 @@ class PolicyCheckResult(BaseModel):
 
 class ConciergeResult(BaseModel):
     """Output schema for the Concierge chat node (Fase 5)."""
-    response_text: str = Field(description="The reply to show the user for this turn.")
+    response_text: str = Field(description="The reply to show the user for this turn (intro/summary sentence).")
+    # Lists go in their own field: under JSON-constrained decoding a small
+    # model avoids newlines inside a string and closes response_text right
+    # at "here's what each file does:" — the list itself was silently lost.
+    details: list[str] = Field(
+        default_factory=list,
+        description="One entry per item when the answer is a list (per file, step, or finding). "
+                    "Put list items HERE, not inside response_text.",
+    )
     resolved: bool = Field(
         description="True if response_text fully answers the request and no Ticket is needed."
     )

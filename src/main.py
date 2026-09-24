@@ -2,8 +2,8 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from src.agent.checkpointer import open_checkpointer
 from src.agent.mcp_client import MCPToolClient
 from src.api.routes import router as webhook_router
 from src.auth.router import router as auth_router
@@ -101,20 +101,21 @@ seed_database()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for FastAPI to handle global resources."""
-    # Initialize the LangGraph checkpointer connection once for the whole app
-    logger.info("Initializing AsyncSqliteSaver at %s", settings.checkpoint_db_path)
-
-    logger.info("Starting MCP tool server subprocess")
-    mcp_client = MCPToolClient()
-    await mcp_client.connect()
-
-    async with AsyncSqliteSaver.from_conn_string(settings.checkpoint_db_path) as memory:
-        app.state.checkpointer = memory
-        app.state.mcp_client = mcp_client
-        yield
-
-    await mcp_client.close()
-    logger.info("Shutting down AsyncSqliteSaver and MCP tool server")
+    # The LangGraph checkpointer (sqlite or Postgres, see
+    # src/agent/checkpointer.py) is opened once for the whole app. It's
+    # opened before the MCP subprocess so a misconfigured backend fails fast
+    # without leaving an orphan tool server behind.
+    async with open_checkpointer(settings) as checkpointer:
+        logger.info("Starting MCP tool server subprocess")
+        mcp_client = MCPToolClient()
+        await mcp_client.connect()
+        try:
+            app.state.checkpointer = checkpointer
+            app.state.mcp_client = mcp_client
+            yield
+        finally:
+            await mcp_client.close()
+    logger.info("Shut down checkpointer and MCP tool server")
 
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware

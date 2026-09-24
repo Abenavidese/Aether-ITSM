@@ -4,13 +4,7 @@ import json
 import os
 import sqlite3
 
-# Set up environment variables before importing app
-os.environ["JWT_SECRET_KEY"] = "test-secret-key"
-os.environ["DATABASE_URL"] = "sqlite:///./test_app.db"
-os.environ["USE_OLLAMA"] = "True"
-os.environ["OLLAMA_MODEL"] = "llama3.1"
-os.environ["CHECKPOINT_DB_PATH"] = "test_checkpoints.db"
-
+# Test environment variables are set in tests/conftest.py (before any import).
 from src.main import app
 from src.db import models
 from src.db.database import engine, SessionLocal

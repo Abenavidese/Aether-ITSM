@@ -30,6 +30,9 @@ langchain-openai==1.6.0
 langchain-protocol==0.0.19
 langgraph==1.2.11
 langgraph-checkpoint==4.2.0
+langgraph-checkpoint-postgres==3.1.2
+psycopg[binary]==3.3.5
+psycopg-pool==3.3.1
 langgraph-checkpoint-sqlite==3.1.1
 langgraph-prebuilt==1.1.0
 langgraph-sdk==0.4.4
