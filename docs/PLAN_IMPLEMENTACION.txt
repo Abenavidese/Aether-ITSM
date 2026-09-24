@@ -432,6 +432,215 @@ FASE 9 - RAG: CHUNKING CONTEXTUAL
         contexto de cada chunk). Con el 8b local haria lenta la subida.
 
 
+FASE 10 - LOGS DE SERVIDORES (RENDER / VERCEL), SOLO LECTURA
+-----------------------------------------------------------
+Objetivo: que el agente pueda (a) saber si un servidor esta caido y
+(b) ver el error y DONDE ocurre (stack trace -> archivo:linea, que ya puede
+leer del repo) para diagnosticarlo. NADA MAS: el agente nunca redespliega,
+reinicia, cambia variables de entorno ni edita nada en la plataforma.
+
+Hecho verificado que condiciona el diseno: las API keys de Render dan acceso
+COMPLETO a todos los workspaces del usuario (no existen keys con scope de
+solo lectura). La restriccion a solo lectura NO puede depender de la key:
+se impone en nuestro codigo, en capas independientes (10.2).
+
+Orden: Render primero (API de logs consultable con filtros). Vercel despues
+(10.11): su endpoint runtime-logs es streaming, con reportes de que se
+cuelga, y la retencion en Hobby es de 1 hora.
+
+10.0 [ ] PRE-REQUISITOS (bloqueante, lo hace el dueno del proyecto)
+        [ ] Confirmar donde corre cada servicio (backend en Render?
+            frontend en Vercel?) y el plan de cada plataforma.
+        [ ] Crear una cuenta/usuario de Render DEDICADA para Aether, miembro
+            solo del workspace necesario, y generar su API key ahi. Nunca la
+            key de la cuenta personal del dueno (tendria acceso a todo).
+        [ ] Verificar si un usuario con rol reducido (Viewer, solo planes
+            avanzados) genera keys que heredan esa restriccion. Si si, usar
+            ese rol: seria una capa extra real del lado de Render.
+        [ ] Anotar ownerId (workspace) y serviceId (srv-...) de cada
+            servicio a vigilar.
+        [ ] Probar a mano con curl: GET /v1/logs?ownerId=..&resource=srv-..
+            &level=error&limit=20 devuelve logs reales. Anotar los rate
+            limits reales de la API.
+        CHECK: curl devuelve logs del servicio real con la key dedicada.
+
+10.1 [DONE] CONFIGURACION POR TENANT (datos)
+        [ ] Company.render_api_key: cifrada con encrypt_token, igual que
+            github_token. La API la devuelve SIEMPRE como "MASKED", nunca
+            el valor (mismo patron de GET /tenant/settings).
+        [ ] Extender cada entrada de monitored_services (Fase 4) con
+            campos opcionales {provider: "render", service_id, owner_id}.
+            Asi el mismo servicio sirve para healthcheck HTTP y para logs.
+        [ ] Validacion estricta: service_id con formato srv-[a-z0-9]+,
+            owner_id tea-/usr-..., provider en allow-list {"render"}.
+        [ ] Solo admin/superadmin puede configurar (mismo control que hoy).
+        [ ] Migracion en _ensure_schema_migrations (ALTER TABLE).
+        CHECK: un employee recibe 403 al intentar editar; GET settings
+        nunca devuelve la key; un service_id invalido da 422.
+
+10.2 [DONE] CLIENTE HTTP DE SOLO LECTURA (garantia central, en codigo)
+        src/integrations/logs/readonly_http.py: el UNICO objeto que habla
+        con la API de la plataforma. Capas independientes:
+        [ ] Solo metodo GET: no expone post/put/patch/delete; cualquier
+            otro metodo lanza excepcion ANTES de tocar la red.
+        [ ] Allow-list de rutas por proveedor (regex exacto), p.ej. Render:
+            GET /v1/logs, GET /v1/services/{srv-id},
+            GET /v1/services/{srv-id}/deploys. Cualquier otra ruta -> error.
+            (Ni /restart, ni /deploys POST, ni /env-vars: no hay forma de
+            construirlas.)
+        [ ] Los service_id/owner_id salen SOLO de la config del tenant
+            (10.1), nunca de texto del LLM ni del usuario.
+        [ ] NO es tool MCP: el LLM no puede invocarlo ni elegir parametros
+            (mismo principio que search_code / get_file_content). Lo llama
+            el codigo del servidor segun reglas deterministicas (10.6).
+        [ ] La key nunca aparece en logs propios, excepciones ni prompts
+            (errores se re-lanzan sin headers).
+        CHECK (tests unitarios): POST/PUT/PATCH/DELETE rechazados sin
+        llamada de red; ruta fuera de allow-list rechazada; ids con
+        caracteres extra (../, ?, &) rechazados.
+
+10.3 [~] PROVEEDOR RENDER (src/integrations/logs/)
+        [ ] Interfaz LogProvider: fetch_logs(service, since, until, level,
+            text, limit) -> list[LogEntry] y get_service_state(service) ->
+            ServiceState (suspended?, ultimo deploy: live/build_failed/...).
+            El resto del sistema no sabe que plataforma hay detras (Vercel
+            se enchufa en 10.11 sin tocar el agente).
+        [ ] RenderLogProvider sobre el cliente de 10.2, con paginacion
+            (hasMore/nextStartTime) acotada a un maximo de paginas.
+        [ ] Timeout corto (10s) y fallo = "sin datos de logs", nunca
+            bloquea ni rompe el turno del chat (patron best-effort de
+            _fetch_repo_tree).
+        [ ] Cache en memoria por (tenant, servicio, ventana) de 60s para no
+            gastar rate limit si varios usuarios reportan lo mismo.
+        CHECK: contra el servicio real devuelve errores de la ultima hora;
+        con la key invalida devuelve [] y un warning, sin excepcion.
+
+10.4 [DONE] SANITIZACION ANTES DEL LLM
+        [ ] Redaccion de secretos/PII: tokens Bearer/JWT, API keys
+            (patrones sk-, ghp_, aeth_live_, srv keys), passwords en query
+            strings, connection strings, emails -> [REDACTED].
+        [ ] Presupuesto: maximo ~40 lineas / 4000 chars, priorizando
+            level=error y deduplicando lineas repetidas ("x57 veces").
+        [ ] Los logs son DATOS, no instrucciones: van en un bloque
+            delimitado y el prompt dice explicitamente que su contenido
+            (paths, mensajes de usuarios) no son ordenes. Defensa contra
+            prompt injection via logs (un atacante controla request paths).
+        CHECK (tests): un log con "Bearer eyJ..." / "password=123" /
+        email sale redactado; 500 lineas iguales quedan en 1 + contador.
+
+10.5 [DONE] DIAGNOSTICO DETERMINISTICO (el veredicto no lo decide el LLM)
+        [ ] ServiceDiagnosis = check_service_status (HTTP, Fase 4) +
+            get_service_state (suspendido / ultimo deploy fallido) +
+            conteo de errores recientes -> estado: CAIDO / DEGRADADO /
+            OPERATIVO, con la evidencia concreta de cada senal.
+        [ ] Extraer de los stack traces las referencias archivo:linea
+            (patrones Node "at fn (/app/src/x.js:42:13)" y Python
+            'File "x.py", line 42') y mapearlas al arbol real del repo.
+        [ ] Esas rutas alimentan la lectura de archivos existente
+            (get_file_content) -> el agente ve la linea que fallo.
+        CHECK: con el servicio suspendido o un deploy fallido el estado es
+        CAIDO aunque el LLM diga otra cosa; un stack trace real produce el
+        archivo:linea correcto del repo.
+
+10.6 [DONE] INTEGRACION EN EL CONCIERGE
+        [ ] Disparadores deterministicos: el usuario reporta caida/error
+            ("no carga", "error 500", "esta caido", "se cae") o
+            check_service_status devuelve available=false -> diagnostico
+            + logs del servicio correspondiente (match por nombre contra
+            monitored_services, nunca un id escrito por el usuario).
+        [ ] DECISION (propuesta): las lineas de log crudas solo se muestran
+            a admin/superadmin. Un employee recibe el veredicto (CAIDO /
+            DEGRADADO + mensaje humano) y, si corresponde, el ticket; nunca
+            lineas de log (pueden contener datos de otros usuarios).
+        [ ] Validador de grounding (ya existe) extendido: codigos de error,
+            rutas y archivos citados deben aparecer en los logs/codigo
+            entregados.
+        [ ] Si el estado es CAIDO o DEGRADADO y no se resuelve en el turno:
+            ticket con el diagnostico adjunto.
+        CHECK (Ollama real): "la tienda da error 500" con un endpoint que
+        falla a proposito -> el agente cita el error real, el archivo:linea
+        y la linea de codigo; "la tienda esta caida" con el servicio
+        suspendido -> CAIDO. Como employee no ve lineas crudas.
+
+10.7 [DONE] ESCALAMIENTO CON EVIDENCIA
+        [ ] El issue de GitHub (Fase 3) incluye el diagnostico: estado,
+            ultimos errores (redactados) y archivo:linea sospechoso.
+        CHECK: un ticket escalado por caida crea un issue con esa seccion.
+
+10.8 [DONE] FRONTEND (Settings > Connections)
+        [ ] Campo Render API key (solo escritura, se muestra MASKED) +
+            por cada servicio monitoreado: provider y service_id.
+        [ ] Boton "Probar conexion": un GET /v1/services/{id} via el
+            backend (mismo cliente de solo lectura), muestra nombre/estado.
+        CHECK: tsc -b sin errores nuevos; probar conexion funciona con la
+        key real y falla con claridad con una invalida.
+
+10.9 [DONE] AUDITORIA
+        [ ] Tabla log_access_audit: tenant, usuario que disparo la
+            consulta, servicio, ventana de tiempo, cantidad de lineas,
+            timestamp. Nunca el contenido de los logs.
+        [ ] Visible para admin en el dashboard (o al menos via API).
+        CHECK: cada consulta de logs del agente deja exactamente 1 fila.
+
+10.10 [~] VERIFICACION Y DOCUMENTACION
+        [ ] Suite pytest: allow-list (10.2), redaccion (10.4), extraccion de
+            stack traces y veredicto (10.5), gating por rol (10.6).
+        [ ] E2E real: servicio de prueba en Render con un endpoint que
+            lanza una excepcion a proposito; recorrer 10.6 con Ollama.
+        [ ] Prueba negativa explicita: intentar via el chat "reinicia el
+            servidor" / "redeploya" -> el agente responde que no puede y
+            ofrece ticket; en el audit/log de red no hay ningun POST.
+        [ ] docs/security_guardrails.md: seccion "Platform log access" con
+            marcadores Implemented/Planned reales.
+        CHECK: todo lo anterior en verde con ejecucion real, no solo
+        lectura de codigo.
+
+10.11 [~] VERCEL (despues de validar Render en uso real)
+        [ ] Verificar que el plan de Vercel del proyecto permite Log Drains
+            (y su costo) antes de implementar nada.
+        [ ] POST /api/integrations/vercel/drain: recibe logs empujados por
+            Vercel, verifica la firma HMAC del header (secreto del drain),
+            rechaza lo no firmado.
+        [ ] Tabla platform_logs con retencion corta (p.ej. 72h, job de
+            limpieza) y aislamiento por tenant_id.
+        [ ] VercelLogProvider implementa la misma interfaz LogProvider
+            leyendo de esa tabla: el agente no cambia.
+        CHECK: un console.error en una funcion de Vercel aparece en el
+        diagnostico del agente en menos de 1 minuto.
+
+
+RESULTADO FASE 10 (implementacion)
+-----------------------------------------------------------
+Codigo: src/integrations/logs/ (readonly_http, base, render, vercel,
+sanitize, diagnosis, service, router). 98/98 tests (pytest) verdes, entre
+ellos: POST/PUT/PATCH/DELETE y rutas fuera de allow-list rechazados SIN
+llamada de red; cache aislada por credencial (hallazgo propio: con clave
+solo por service_id, un tenant que configurara el srv-id de otro leia sus
+logs cacheados); redaccion; veredicto; gating por rol; auditoria; drain
+firmado; tsc -b sin errores nuevos.
+Decisiones tomadas al implementar:
+- 10.6: lineas crudas solo admin/superadmin (lo propuesto en el plan).
+- CAIDO => ticket siempre; DEGRADADO => lo decide el turno.
+- Tickets/issues NUNCA llevan lineas de log (el repo puede ser publico):
+  solo veredicto, evidencia y archivo:linea.
+- Sin filtro de level del lado de Render (sus valores exactos no estan
+  verificados; un valor invalido podria romper la consulta): el nivel se
+  infiere por entrada (label, HTTP 5xx, texto Error/Exception/Traceback).
+- Si el modelo afirma haber hecho una accion sobre un servidor
+  ("reinicie el servidor", visto con el 8B en un test), se descarta.
+- Vercel: projectId del drain puede venir sin "prj_" (ejemplo oficial);
+  se aceptan ambos y se comparan normalizados. Firma HMAC-SHA1 hex.
+Verificado con Ollama real (repo real core-ecommerce-api, Render SIMULADO):
+admin -> "cartController.js linea 5: req.user undefined al leer sub";
+employee -> mismo diagnostico sin ninguna linea de log; "reinicia el
+servidor" -> rechazo + ticket; a la API solo llegaron GET a las 3 rutas.
+PENDIENTE (requiere 10.0, credenciales reales):
+- 10.3/10.10: curl y E2E contra un servicio real de Render (confirmar
+  formato de /v1/logs, labels y status de deploys; rate limits).
+- 10.11: confirmar que el plan de Vercel permite drains y probar un
+  console.error real llegando en < 1 min.
+
+
 ESTADO AL CIERRE DE ESTA SESION
 -----------------------------------------------------------
 Fases 0-7 y 8.1 completas y verificadas con ejecucion real (pytest 7/7

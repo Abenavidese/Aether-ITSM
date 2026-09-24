@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 120.0
     ollama_num_ctx: int = 8192
 
+    # ── Platform logs (Fase 10) ──
+    # Vercel drain lines are kept only this long (purged on each ingest).
+    platform_log_retention_hours: int = 72
+    # Upper bound for one drain delivery; larger bodies are rejected (413).
+    platform_log_max_body_bytes: int = 5_000_000
+
     # ── RAG ──
     # Max cosine distance (0 = identical, 2 = opposite) for a chunk to count
     # as relevant in retrieve_context(). Calibrated against nomic-embed-text

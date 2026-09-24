@@ -125,3 +125,11 @@ def test_list_items_from_details_are_rendered_in_the_reply():
     assert _compose_reply(result) == (
         "Esto hace cada archivo:\n\n- auth.js: valida el JWT\n- wrap.js: captura errores async"
     )
+
+
+def test_schema_junk_items_are_dropped_from_the_reply():
+    from src.agent.concierge import _compose_reply
+    from src.agent.state import ConciergeResult
+    result = ConciergeResult(response_text="Intro", resolved=True,
+                             details=["real finding: cartController.js:5", "tool_used_check_service_status:false,"])
+    assert _compose_reply(result) == "Intro\n\n- real finding: cartController.js:5"

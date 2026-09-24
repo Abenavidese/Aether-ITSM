@@ -23,6 +23,9 @@ from src.config import get_llms
 from src.db.database import SessionLocal
 from src.db.models import Company
 from src.integrations.github import get_file_content, get_repo_tree, search_code
+from src.integrations.logs.base import ServiceRef
+from src.integrations.logs.diagnosis import DOWN
+from src.integrations.logs.service import RAW_LOG_ROLES, ServiceDiagnosis, diagnose_service, get_log_services
 from src.integrations.monitoring import get_monitored_services
 from src.rag.service import retrieve_context
 
@@ -376,8 +379,62 @@ async def _file_contents_context(tenant_id: str, files: list[str]) -> str:
     return "\n\n".join(parts)
 
 
+# Outage/error reports and explicit log requests — what triggers a read-only
+# look at the hosting platform (Fase 10.6).
+_OUTAGE_PATTERN = re.compile(
+    r"\b(ca[ií]d[oa]s?|se (cae|cay[oó])|down|no (carga|funciona|responde|abre|conecta|anda)"
+    r"|error(es)? (5\d\d|del servidor|en (el )?servidor|interno)|5\d\d|timeouts?|crash\w*"
+    r"|lent[oa]s?|logs?|registros)\b",
+    re.IGNORECASE,
+)
+
+# Requests to CHANGE a server. The agent can't (no code path exists for it);
+# this only guarantees the answer says so and routes it to humans.
+_SERVER_MUTATION_PATTERN = re.compile(
+    r"\b(reinici(a|e|ar|alo|a el)|restart|reboot|redespl(ie|e)g\w*|redeploy\w*|rollback|revert(ir|ar)?"
+    r"|apag(a|ar|alo)|suspend(e|er)|escal(a|ar) (el|los) (servidor|servicio|instancia)s?"
+    r"|haz (un )?(deploy|despliegue))\b",
+    re.IGNORECASE,
+)
+
+# The model CLAIMING it changed a server ("listo, reinicié el servidor") —
+# always false, since no code path for that exists. Seen with the local 8B.
+_CLAIMED_SERVER_ACTION_PATTERN = re.compile(
+    r"\b(reinici[eé]|he reiniciado|reiniciado|redesplegu[eé]|he redesplegado|redesplegado|restarted"
+    r"|redeployed|rolled back|revert[ií]|apagu[eé]|suspend[ií]|escal[eé] (el|los) (servidor|servicio))\b",
+    re.IGNORECASE,
+)
+
+_MAX_SERVICES_PER_TURN = 3
+
+
+def _pick_services(services: list[ServiceRef], text: str) -> list[ServiceRef]:
+    """Services named in the conversation; if none is named, all of them
+    (capped) — "la tienda no carga" doesn't say which service is behind it."""
+    lowered = text.lower()
+    named = [s for s in services if s.name.lower() in lowered
+             or any(len(w) >= 4 and w in lowered for w in re.findall(r"\w+", s.name.lower()))]
+    return (named or services)[:_MAX_SERVICES_PER_TURN]
+
+
+def _health_checker(mcp_client: MCPToolClient):
+    """Reuses the existing check_service_status MCP tool (Fase 4)."""
+    async def check(url: str) -> dict | None:
+        raw = await mcp_client.call_tool("check_service_status", {"service_url": url})
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return None
+    return check
+
+
+# Schema-ish junk a small model sometimes emits as a list item
+# ("tool_used_check_service_status:false,").
+_JUNK_DETAIL = re.compile(r"^[\w.-]+\s*:\s*(true|false|null|none|\d+)?\s*,?$", re.IGNORECASE)
+
+
 def _compose_reply(result: ConciergeResult) -> str:
-    items = [d.strip() for d in result.details if d and d.strip()]
+    items = [d.strip() for d in result.details if d and d.strip() and not _JUNK_DETAIL.match(d.strip())]
     if not items:
         return result.response_text
     return result.response_text.rstrip() + "\n\n" + "\n".join(f"- {item.lstrip('-• ')}" for item in items)
@@ -443,9 +500,28 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
             repo_view = _describe_directory(repo_tree, user_query)
     directory_context = repo_view.context
 
+    # Fase 10.6: an outage/error report (or an explicit "check the logs")
+    # triggers a READ-ONLY look at the hosting platform: deterministic
+    # verdict + redacted recent errors + the file:line they point to.
+    user_context = state.get("user_context", {})
+    diagnoses: list[ServiceDiagnosis] = []
+    if tenant_id and _OUTAGE_PATTERN.search(user_query):
+        targets = _pick_services(get_log_services(tenant_id), recent_text)
+        if targets:
+            if not repo_tree:
+                repo_tree = await _fetch_repo_tree(tenant_id)
+            health_check = _health_checker(mcp_client)
+            for ref in targets:
+                diagnoses.append(await diagnose_service(
+                    tenant_id, user_context.get("user_id"), ref, health_check, repo_tree,
+                ))
+    include_raw_logs = user_context.get("role") in RAW_LOG_ROLES
+    diagnosis_context = "\n\n".join(d.for_prompt(include_raw_logs) for d in diagnoses)
+
     # Names alone can't diagnose anything — read the actual code when the
-    # user names a file, or asks to review/explain a folder's contents.
-    files_to_read = list(repo_view.files)
+    # user names a file, asks to review/explain a folder's contents, or a
+    # stack trace in the logs points at it.
+    files_to_read = [l.repo_path for d in diagnoses for l in d.locations] + list(repo_view.files)
     if _REVIEW_PATTERN.search(user_query) and not repo_view.fallback:
         for d in repo_view.listed_dirs:
             if d:  # never "read the whole repo root"
@@ -496,7 +572,16 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
     {f"Relevant code found in the company repository:\n{code_context}\n" if code_context else ""}
     {f"Repository directory listing:\n{directory_context}\n" if directory_context else ""}
     {f"Real file contents (fetched from GitHub just now, with line numbers):\n{file_context}\n" if file_context else ""}
+    {f"Service diagnosis (computed by code from real platform data — the status is authoritative, don't contradict it):\n{diagnosis_context}\n" if diagnosis_context else ""}
     {services_note}
+    You have READ-ONLY access to servers: you can see status and logs, but you
+    can NOT restart, redeploy, scale, roll back, suspend or change any server
+    or its settings, and no tool can. If asked to, say plainly that you can't
+    and that a ticket will go to the engineering team. Never claim you did it.
+
+    When a service diagnosis is present: explain in plain words what is
+    failing, and if code locations are given, read those lines in the file
+    contents and say what in that code causes the error.
     Available tools:
     {mcp_client.prompt_catalog()}
 
@@ -529,7 +614,9 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
         str(m.content) for m in state["messages"]
         if isinstance(m, HumanMessage) and isinstance(m.content, str)
     )
-    grounding_text = "\n".join([policy_context, tech_context, code_context, directory_context, file_context, user_text])
+    grounding_text = "\n".join([
+        policy_context, tech_context, code_context, directory_context, file_context, diagnosis_context, user_text,
+    ])
     ungrounded = _ungrounded_repo_names(_compose_reply(result), repo_tree, grounding_text)
     if ungrounded:
         logger.warning("Concierge response named non-existent repo items %s — retrying once", sorted(ungrounded))
@@ -570,10 +657,27 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
         except Exception as e:
             logger.warning("Concierge tool call '%s' failed: %s", result.tool_name, e)
 
+    resolved = result.resolved
+    # Deterministic, whatever the model wrote: the verdict is stated by code,
+    # a DOWN service always becomes a ticket, and a request to change a server
+    # always gets the read-only answer (and goes to humans as a ticket).
+    if _CLAIMED_SERVER_ACTION_PATTERN.search(response_text):
+        logger.warning("Concierge claimed a server action it cannot perform — discarding its reply")
+        response_text = "No realicé ninguna acción sobre los servidores."
+    if diagnoses:
+        response_text += "\n\n" + "\n".join(d.verdict_line() for d in diagnoses)
+        if any(d.verdict.status == DOWN for d in diagnoses):
+            resolved = False
+    if _SERVER_MUTATION_PATTERN.search(user_query):
+        response_text += ("\n\n🔒 No puedo reiniciar, redesplegar ni modificar servidores: mi acceso es de "
+                          "solo lectura (estado y logs). Lo derivo al equipo de ingeniería con un ticket.")
+        resolved = False
+
     return {
         "messages": [AIMessage(content=response_text)],
-        "resolved": result.resolved,
+        "resolved": resolved,
         "final_response": response_text,
+        "diagnosis_report": "\n\n".join(d.for_ticket() for d in diagnoses) or None,
     }
 
 

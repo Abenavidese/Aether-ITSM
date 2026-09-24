@@ -37,7 +37,15 @@ class Company(Base):
     llm_engine = Column(String, default="nemotron-nano")
     # JSON-encoded list of {"name": str, "url": str} — services the agent can
     # healthcheck via the check_service_status MCP tool (see src/tools/mcp_server.py).
+    # Optional per-entry {"provider", "service_id", "owner_id"} link a service
+    # to its hosting platform's logs (Fase 10, src/integrations/logs/).
     monitored_services = Column(String, nullable=True)
+    # Fernet-encrypted, never returned by the API (always "MASKED"). A Render
+    # API key has FULL account access (Render has no read-only key scope), so
+    # read-only is enforced in code: src/integrations/logs/readonly_http.py.
+    render_api_key = Column(String, nullable=True)
+    # Fernet-encrypted shared secret Vercel signs Log Drain payloads with.
+    vercel_drain_secret = Column(String, nullable=True)
     
     plan_id = Column(String, ForeignKey("subscription_plans.id"), nullable=True)
     
@@ -101,3 +109,45 @@ class Ticket(Base):
 
     company = relationship("Company")
     user = relationship("User", back_populates="tickets")
+
+
+class LogAccessAudit(Base):
+    """
+    One row per platform-log read the agent performs (Fase 10.9). Records
+    WHO triggered it and WHAT was read — never the log contents themselves,
+    so the audit trail can't become a second copy of sensitive log data.
+    """
+    __tablename__ = "log_access_audit"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    service_name = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
+    service_id = Column(String, nullable=False)
+    window_start = Column(DateTime(timezone=True), nullable=False)
+    window_end = Column(DateTime(timezone=True), nullable=False)
+    lines_returned = Column(Integer, default=0)
+    verdict = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class PlatformLog(Base):
+    """
+    Log lines PUSHED to us by a platform (Vercel Log Drain, Fase 10.11) —
+    Vercel's pull API only keeps 1h of logs on Hobby and its runtime-logs
+    endpoint is streaming-only, so we keep a short-retention copy instead.
+    Always queried by tenant_id; purged after settings.platform_log_retention_hours.
+    """
+    __tablename__ = "platform_logs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    provider = Column(String, nullable=False)
+    service_id = Column(String, nullable=False, index=True)   # Vercel projectId
+    level = Column(String, nullable=True)
+    message = Column(String, nullable=False)
+    source = Column(String, nullable=True)
+    status_code = Column(Integer, nullable=True)
+    request_path = Column(String, nullable=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)

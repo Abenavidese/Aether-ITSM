@@ -2,8 +2,8 @@ import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, field_validator
-from typing import Optional
+from pydantic import BaseModel, field_validator, model_validator
+from typing import Literal, Optional
 from src.db.database import get_db
 from src.db.models import User, Company, Ticket
 from src.security.deps import get_current_user
@@ -20,6 +20,22 @@ router = APIRouter(prefix="/tenant", tags=["tenant"])
 # Only "owner/repo" — this value is interpolated straight into a GitHub API URL,
 # so it must never contain path separators, "..", or scheme/host characters.
 GITHUB_REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+LOG_SERVICE_ID_PATTERNS = {
+    "render": re.compile(r"srv-[a-z0-9]{10,40}"),
+    # The dashboard shows "prj_..." but drain payloads carry the bare id
+    # (Vercel's own drain example: "gdufoJxB6b9b1fEqr1jUtFkyavUU"); accept
+    # both — src/integrations/logs/vercel.py compares them normalized.
+    "vercel": re.compile(r"(prj_)?[A-Za-z0-9]{10,40}"),
+}
+RENDER_OWNER_ID_PATTERN = re.compile(r"(tea|usr)-[a-z0-9]{10,40}")
+
+
+def _set_write_only_secret(company: Company, column: str, value: Optional[str]) -> None:
+    if value is None or value == "MASKED":
+        return
+    setattr(company, column, encrypt_token(value) if value else None)
 
 
 def _validate_github_repo(v: Optional[str]) -> Optional[str]:
@@ -98,12 +114,39 @@ def get_tenant_settings(db: Session = Depends(get_db), current_user: User = Depe
         "user_full_name": current_user.full_name,
         "user_job_title": current_user.job_title,
         "company_name": company.name,
-        "monitored_services": json.loads(company.monitored_services) if company.monitored_services else []
+        "monitored_services": json.loads(company.monitored_services) if company.monitored_services else [],
+        "render_api_key": "MASKED" if company.render_api_key else "",
+        "vercel_drain_secret": "MASKED" if company.vercel_drain_secret else "",
+        # Relative to the API base; the frontend prefixes its own API URL.
+        "vercel_drain_path": f"/integrations/vercel/drain/{company.id}",
     }
 
 class MonitoredService(BaseModel):
     name: str
     url: str
+    # Fase 10: optional link to the hosting platform's logs. These ids are
+    # interpolated into platform API paths by the read-only client, so they
+    # are validated to their exact documented shape here — never anything
+    # that could smuggle "/", "..", "?" or "&" into a request.
+    provider: Optional[Literal["render", "vercel"]] = None
+    service_id: Optional[str] = None
+    owner_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_log_source(self):
+        if self.provider is None:
+            if self.service_id or self.owner_id:
+                raise ValueError("service_id/owner_id require a provider")
+            return self
+        pattern = LOG_SERVICE_ID_PATTERNS[self.provider]
+        if not self.service_id or not pattern.fullmatch(self.service_id):
+            raise ValueError(f"service_id for {self.provider} must match {pattern.pattern}")
+        if self.provider == "render":
+            if not self.owner_id or not RENDER_OWNER_ID_PATTERN.fullmatch(self.owner_id):
+                raise ValueError(f"owner_id for render must match {RENDER_OWNER_ID_PATTERN.pattern}")
+        elif self.owner_id:
+            raise ValueError(f"owner_id is not used by {self.provider}")
+        return self
 
 class UpdateSettingsPayload(BaseModel):
     github_token: Optional[str] = None
@@ -112,8 +155,23 @@ class UpdateSettingsPayload(BaseModel):
     user_full_name: Optional[str] = None
     company_name: Optional[str] = None
     monitored_services: Optional[list[MonitoredService]] = None
+    # Write-only secrets: GET /settings returns "MASKED" for them, and
+    # sending "MASKED" back (the frontend's untouched field) keeps the stored
+    # value. An empty string clears it.
+    render_api_key: Optional[str] = None
+    vercel_drain_secret: Optional[str] = None
 
     _validate_repo = field_validator("github_repo")(_validate_github_repo)
+
+    @field_validator("monitored_services")
+    @classmethod
+    def _unique_service_names(cls, v):
+        # The agent resolves "which service?" by name, so names must be unique.
+        if v is not None:
+            names = [s.name.strip().lower() for s in v]
+            if len(names) != len(set(names)):
+                raise ValueError("monitored service names must be unique")
+        return v
 
 @router.put("/settings")
 def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -136,7 +194,11 @@ def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends
     if payload.user_full_name is not None:
         current_user.full_name = payload.user_full_name
     if payload.monitored_services is not None:
-        company.monitored_services = json.dumps([s.model_dump() for s in payload.monitored_services])
+        company.monitored_services = json.dumps(
+            [s.model_dump(exclude_none=True) for s in payload.monitored_services]
+        )
+    _set_write_only_secret(company, "render_api_key", payload.render_api_key)
+    _set_write_only_secret(company, "vercel_drain_secret", payload.vercel_drain_secret)
 
     db.commit()
     
@@ -170,6 +232,62 @@ async def test_github_connection(db: Session = Depends(get_db), current_user: Us
         "stars": repo_data.get("stargazers_count", 0),
         "open_issues": repo_data.get("open_issues_count", 0)
     }
+
+@router.get("/test-logs")
+async def test_log_connection(service_name: str, db: Session = Depends(get_db),
+                              current_user: User = Depends(get_current_user)):
+    """
+    Fase 10.8 "Probar conexión": one read through the SAME read-only client
+    the agent uses (GET service state), so a green result proves exactly the
+    path the agent will take — not a separate code path.
+    """
+    if current_user.role not in ["superadmin", "admin"]:
+        raise HTTPException(status_code=403, detail="Not authorized.")
+
+    from src.integrations.logs.readonly_http import PlatformAPIError
+    from src.integrations.logs.service import build_provider, get_log_services
+
+    ref = next((s for s in get_log_services(current_user.company_id) if s.name == service_name), None)
+    if ref is None:
+        raise HTTPException(status_code=404, detail="No log-enabled service with that name.")
+    provider = build_provider(current_user.company_id, ref)
+    if provider is None:
+        raise HTTPException(status_code=400, detail=f"{ref.provider} credentials not configured.")
+
+    try:
+        state = await provider.get_service_state(ref)
+    except PlatformAPIError as e:
+        logger.warning("Log connection test failed for company %s: %s", current_user.company_id, e)
+        detail = "Invalid API key or no access to that service." if e.status_code in (401, 403, 404) else str(e)
+        raise HTTPException(status_code=400, detail=f"Failed to connect: {detail}")
+
+    return {
+        "status": "success",
+        "message": f"Connected to {ref.provider} service '{state.name or ref.service_id}'.",
+        "suspended": state.suspended,
+        "last_deploy_status": state.last_deploy_status,
+    }
+
+
+@router.get("/log-audit")
+def get_log_access_audit(limit: int = 50, db: Session = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """Fase 10.9: who made the agent read which service's logs, and when."""
+    if current_user.role not in ["superadmin", "admin"]:
+        raise HTTPException(status_code=403, detail="Not authorized.")
+    from src.db.models import LogAccessAudit
+
+    rows = (db.query(LogAccessAudit, User.email)
+            .outerjoin(User, User.id == LogAccessAudit.user_id)
+            .filter(LogAccessAudit.tenant_id == current_user.company_id)
+            .order_by(LogAccessAudit.created_at.desc())
+            .limit(max(1, min(limit, 200))).all())
+    return [{
+        "service_name": r.service_name, "provider": r.provider, "service_id": r.service_id,
+        "triggered_by": email, "window_start": r.window_start, "window_end": r.window_end,
+        "lines_returned": r.lines_returned, "verdict": r.verdict, "created_at": r.created_at,
+    } for r, email in rows]
+
 
 @router.get("/dashboard")
 def get_dashboard_metrics(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

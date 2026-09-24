@@ -10,6 +10,7 @@ from src.auth.router import router as auth_router
 from src.tenant.router import router as tenant_router
 from src.tenant.user_router import router as user_router
 from src.rag.router import router as rag_router
+from src.integrations.logs.router import router as log_drain_router
 from src.db.database import engine
 from src.db import models
 from src.config import get_settings
@@ -41,6 +42,8 @@ def _ensure_schema_migrations():
             "ALTER TABLE companies ADD COLUMN api_key_hash VARCHAR",
             "ALTER TABLE tickets ADD COLUMN external_id VARCHAR",
             "ALTER TABLE companies ADD COLUMN monitored_services VARCHAR",
+            "ALTER TABLE companies ADD COLUMN render_api_key VARCHAR",
+            "ALTER TABLE companies ADD COLUMN vercel_drain_secret VARCHAR",
         ):
             try:
                 conn.execute(text(statement))
@@ -147,6 +150,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(tenant_router, prefix="/api")
 app.include_router(user_router, prefix="/api")
 app.include_router(rag_router, prefix="/api")
+app.include_router(log_drain_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():

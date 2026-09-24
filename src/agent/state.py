@@ -95,3 +95,7 @@ class ConciergeState(TypedDict):
     user_context: dict
     resolved: Optional[bool]
     final_response: Optional[str]
+    # Fase 10.7: deterministic service diagnosis from this turn (verdict,
+    # code locations, redacted errors), attached to the Ticket — and so to
+    # the GitHub issue — when the turn escalates.
+    diagnosis_report: Optional[str]

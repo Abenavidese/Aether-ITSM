@@ -45,6 +45,20 @@ The business logic defined in the PRD acts as the ultimate security gate:
 1.  **Risk Matrix Enforcement — Implemented (`src/agent/risk_policy.py`).** The mapping of certain incident types to a *minimum* Risk Level is hardcoded in Python via `enforce_risk_floor()`, not left entirely to the LLM's judgment — the classifier's own `risk_level` can only be raised by these rules, never lowered. IAM/administrative-access requests floor at Risk 3; production-database and firewall incidents floor at Risk 4. This was originally aspirational in this document; it was actually implemented after an end-to-end test run with a local model demonstrated the gap directly — the classifier rated an "AWS Admin / IAM" ticket low enough to skip human approval entirely, and `modify_iam_access` executed with no sign-off. `enforce_risk_floor()` is what closes that gap.
 2.  **Cryptographic Human-in-the-Loop — Partially implemented.** For Level 3 actions, the execution thread halts (LangGraph `interrupt_after`) and only resumes via `POST /api/approve/{ticket_id}`, restricted to `admin`/`superadmin` roles of the ticket's own tenant. The "cryptographically signed webhook" proving a specific human clicked Approve is not implemented yet — today it's session-cookie auth + a role check, not a signed assertion. Treat that distinction as real until it's built.
 
+### 3.3 Platform Log Access (Render / Vercel) — Implemented, read-only
+The agent can read hosting-platform status and logs to tell whether a service is down and where an error happens. It can never change anything. **A Render API key has full access to every workspace of its user — Render offers no read-only key scope** — so read-only is enforced by Aether's code, in independent layers:
+
+1.  **Single read-only HTTP client — Implemented (`src/integrations/logs/readonly_http.py`).** The only object that talks to the platform exposes `get()` and nothing else; any other verb is refused before touching the network. Every path must fully match an allow-list (`/v1/logs`, `/v1/services/{srv-id}`, `/v1/services/{srv-id}/deploys`); restart/redeploy/env-var endpoints cannot be expressed. Redirects are not followed; the token never appears in logs, errors or `repr`.
+2.  **Not an LLM tool — Implemented.** Log reads are triggered by deterministic server code (outage/error wording in the chat), never by a `tool_name` the model picks. Service ids come only from tenant settings validated to their exact shape (`src/tenant/router.py`).
+3.  **Sanitization — Implemented (`src/integrations/logs/sanitize.py`).** Secrets and PII (bearer tokens, JWTs, API keys, credentials in URLs, emails, card-like numbers) are redacted; duplicates folded; output budgeted; logs are fenced as untrusted data (defense against prompt injection through request paths).
+4.  **Deterministic verdict — Implemented (`src/integrations/logs/diagnosis.py`).** DOWN / DEGRADED / UP is computed from the healthcheck, platform state and error count, and appended to the reply by code; a DOWN service always opens a ticket.
+5.  **Role gating — Implemented.** Only `admin`/`superadmin` get raw log lines in the model's context; employees get the verdict, evidence and code locations. Tickets/GitHub issues never contain log lines (the repo may be public).
+6.  **Audit — Implemented.** Every read writes a `log_access_audit` row (who, which service, window, verdict — never contents), visible to admins.
+7.  **Vercel via Log Drain — Implemented.** Vercel pushes logs to `POST /api/integrations/vercel/drain/{tenant_id}`, verified with HMAC-SHA1 (constant-time) of the raw body; only configured projects are stored, redacted at rest, with 72h retention. Aether never calls Vercel's API.
+8.  **Claimed-action guard — Implemented.** A reply claiming a server action ("reinicié el servidor") is discarded; mutation requests always get the fixed read-only answer and a ticket.
+
+**Operational requirement (not enforceable in code):** create the Render key from a dedicated Render user that belongs only to the workspace Aether should see.
+
 ## 4. Summary of Agent Capabilities
 
 | Capability | Allowed? | Restriction Mechanism | Status |
@@ -54,6 +68,8 @@ The business logic defined in the PRD acts as the ultimate security gate:
 | **Execute High-Risk (Risk 3) actions** | ⚠️ Gated | Hard-paused (`interrupt_after`); only resumes via `POST /api/approve/{id}` (admin/superadmin, own tenant). | Implemented |
 | **Escalate to engineering (GitHub Issue)** | ✅ Yes | Deterministic, not LLM-decided — triggered by `escalate_node` reaching a terminal state (`src/integrations/github.py`). | Implemented |
 | **Override the model's own risk classification** | ✅ Yes (Python only) | `enforce_risk_floor()` can only raise risk, never lower it; the LLM cannot override this. | Implemented |
+| **Read hosting-platform status & logs (Render/Vercel)** | ✅ Read-only | GET-only client with a path allow-list, deterministic triggers, redaction, role gating, audit (§3.3). | Implemented |
+| **Restart / redeploy / modify servers** | ❌ No | No code path exists; requests get a fixed refusal + ticket; claimed actions are discarded (§3.3). | Implemented |
 | **Read ITSM Tickets from an external queue** | — | No ITSM (Jira/ServiceNow) integration exists yet; tickets arrive via `POST /api/webhook/ticket`. | Not applicable yet |
 | **Execute Arbitrary Code / spawn processes** | ❌ No (by design of the tools, not by sandboxing) | No OpenShell or equivalent sandbox wraps `mcp_server.py` yet — see §3.1. | Planned |
 | **Network/filesystem isolation for tool execution** | ❌ Not enforced | Same as above. | Planned |

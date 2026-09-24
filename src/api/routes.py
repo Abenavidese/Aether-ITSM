@@ -391,7 +391,13 @@ async def chat(
 
     initial_state = {
         "messages": [HumanMessage(content=payload.message)],
-        "user_context": {"email": current_user.email, "tenant_id": current_user.company_id},
+        "user_context": {
+            "email": current_user.email, "tenant_id": current_user.company_id,
+            # role gates raw platform-log lines (Fase 10.6); user_id is
+            # recorded in the log access audit (Fase 10.9).
+            "role": current_user.role, "user_id": current_user.id,
+        },
+        "diagnosis_report": None,
     }
     async for _ in concierge_app.astream(initial_state, config=config):
         pass
@@ -399,6 +405,7 @@ async def chat(
     snapshot = await concierge_app.aget_state(config)
     reply = snapshot.values.get("final_response", "")
     resolved = snapshot.values.get("resolved", True)
+    diagnosis_report = snapshot.values.get("diagnosis_report")
 
     if resolved:
         return {"reply": reply, "status": "resolved"}
@@ -418,8 +425,14 @@ async def chat(
             }
 
     external_id = f"chat-{uuid.uuid4().hex[:10]}"
+    description = payload.message
+    if diagnosis_report:
+        # Evidence travels with the ticket, so the engineer (and the GitHub
+        # issue built from this description on escalation) starts from the
+        # real verdict and failing code location, not just "it's broken".
+        description = f"{payload.message}\n\n--- Diagnóstico automático (Aether) ---\n{diagnosis_report}"
     ticket = await _create_and_dispatch_ticket(
-        db, company, current_user, external_id, payload.message[:120], payload.message,
+        db, company, current_user, external_id, payload.message[:120], description,
         background_tasks, request.app.state.checkpointer, request.app.state.mcp_client,
     )
     return {"reply": reply, "status": "investigating", "ticket_external_id": ticket.external_id}
