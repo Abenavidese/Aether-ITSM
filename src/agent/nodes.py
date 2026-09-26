@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from langchain_core.runnables import RunnableConfig
@@ -8,7 +9,7 @@ from .state import AgentState, ClassificationResult, ExecutionPlanResult, Policy
 from .structured_output import invoke_structured as _invoke_structured
 from .tool_policy import (
     AuthorizedToolCall, ToolCallContext, ToolPolicyViolation, allowed_tools, authorize, identity_params, normalize_url,
-    risk_of_tools,
+    proposable_tools, required_risk, risk_of_tools,
 )
 from src.config import get_llms
 from src.integrations.monitoring import get_monitored_services
@@ -18,11 +19,20 @@ from src.security.prompt_safety import UNTRUSTED_DATA_POLICY, untrusted_block
 logger = logging.getLogger(__name__)
 
 
-def _tool_context(state: AgentState, *, human_approved: bool | None = None) -> ToolCallContext:
+async def _monitored_services(state: AgentState) -> list[dict]:
+    # DB lookup off the event loop (roadmap 2.1).
+    tenant_id = state.get("user_context", {}).get("tenant_id")
+    return await asyncio.to_thread(get_monitored_services, tenant_id) if tenant_id else []
+
+
+async def _retrieve(tenant_id: str, query: str, source_type: str, top_k: int = 4) -> str:
+    # Embedding + pgvector search is blocking I/O: run it in a worker thread.
+    return await asyncio.to_thread(retrieve_context, tenant_id, query, source_type=source_type, top_k=top_k)
+
+
+def _tool_context(state: AgentState, services: list[dict], *, human_approved: bool | None = None) -> ToolCallContext:
     """Authorization context built from state/config only — never from LLM output."""
     user_context = state.get("user_context", {})
-    tenant_id = user_context.get("tenant_id")
-    services = get_monitored_services(tenant_id) if tenant_id else []
     return ToolCallContext(
         requester=user_context.get("email"),
         assessed_risk=state.get("assessed_risk", 4),
@@ -44,10 +54,19 @@ async def supervisor_node(state: AgentState) -> dict:
     Context: {json.dumps(state.get('user_context', {}))}
 
     Assign a risk_level:
-    0 = Generic Question / FAQ (Can be solved simply by asking Execution Agent to read docs)
-    1-2 = Low Risk Action (e.g. Reset VPN, Install standard software)
-    3 = High Risk Action (e.g. Modify IAM, Admin access)
-    4 = Escalate (Technical error, vague request, or dangerous)
+    0 = Generic Question / FAQ: the user only wants information (a policy, a guide, where something is)
+    1-2 = Low Risk Action on the user's OWN account: reset their VPN session, install standard software
+    3 = High Risk Action: admin/root/superuser rights, IAM or cloud permissions
+    4 = Escalate: production outages, firewall/network changes, destructive or company-wide changes,
+        or a request too vague to act on
+
+    Examples (the request may be in Spanish or English):
+    - "how do I set up the printer?" / "¿dónde está la guía de la impresora?" -> 0
+    - "the VPN keeps disconnecting me, can you reset it?" / "la VPN no me conecta" -> 2
+    - "please install Docker" / "necesito que me instalen VS Code" -> 2
+    - "give me admin rights on the AWS account" / "necesito acceso root" -> 3
+    - "the production API is down" / "cambien las reglas del firewall" / "no funciona nada" -> 4
+    A user's own problem that needs an ACTION is never 0, even if phrased as a question.
     """
 
     messages = build_prompt(prompt, state["messages"])
@@ -100,7 +119,7 @@ async def policy_agent_node(state: AgentState) -> dict:
     rag_context = ""
     if tenant_id and user_query:
         # Policy agent specifically queries the company_policy RAG
-        rag_context = retrieve_context(tenant_id, user_query, source_type="company_policy")
+        rag_context = await _retrieve(tenant_id, user_query, "company_policy")
 
     prompt = f"""
     You are the Compliance & Security Agent.
@@ -154,7 +173,8 @@ async def _execute_approved_plan(state: AgentState, mcp_client: MCPToolClient) -
     if not action:
         return {"action_refused": "the approved plan has no automated action; an engineer must carry it out"}
     try:
-        call = authorize(action.get("tool_name"), action.get("tool_args"), _tool_context(state))
+        call = authorize(action.get("tool_name"), action.get("tool_args"),
+                         _tool_context(state, await _monitored_services(state)))
     except ToolPolicyViolation as e:
         logger.warning("Approved action refused at execution time for ticket %s: %s", state.get("ticket_id"), e)
         return {"action_refused": e.reason}
@@ -190,11 +210,13 @@ async def execution_agent_node(state: AgentState, config: RunnableConfig) -> dic
     if tenant_id and user_query:
         # Execution agent queries technical docs (or company policy if risk 0)
         source = "company_policy" if state.get('assessed_risk') == 0 else "technical_repo"
-        rag_context = retrieve_context(tenant_id, user_query, source_type=source)
-        ai_feedback = retrieve_context(tenant_id, user_query, source_type="ai_feedback", top_k=2)
+        rag_context, ai_feedback = await asyncio.gather(
+            _retrieve(tenant_id, user_query, source),
+            _retrieve(tenant_id, user_query, "ai_feedback", top_k=2),
+        )
 
-    ctx = _tool_context(state)
-    monitored_services = get_monitored_services(tenant_id) if tenant_id else []
+    monitored_services = await _monitored_services(state)
+    ctx = _tool_context(state, monitored_services)
     services_note = ""
     if monitored_services:
         services_list = "\n".join(f"- {s['name']}: {s['url']}" for s in monitored_services)
@@ -223,7 +245,7 @@ async def execution_agent_node(state: AgentState, config: RunnableConfig) -> dic
     Available tools (call exactly one if the ticket requires a real action;
     leave tool_name null for a purely informational answer). Tools always act
     on the requesting user's own account (never pass who it is for):
-    {mcp_client.prompt_catalog(only=allowed_tools(ctx), hidden_params=identity_params())}
+    {mcp_client.prompt_catalog(only=proposable_tools(), hidden_params=identity_params())}
     If you set tool_name, tool_args must match that tool's parameters exactly.
     """
     messages = build_prompt(prompt, state["messages"])
@@ -233,6 +255,15 @@ async def execution_agent_node(state: AgentState, config: RunnableConfig) -> dic
 
         tool_output = None
         if result.tool_name:
+            needed = required_risk(result.tool_name)
+            if needed is not None and needed > ctx.assessed_risk and not state.get("risk_rerouted"):
+                # The model says this ticket needs a riskier action than the
+                # classifier thought. Risk only ever goes UP: re-route through
+                # Policy (and, for risk 3, draft_plan + human approval) instead
+                # of refusing outright. Once per ticket, so it can't loop.
+                logger.info("Ticket %s: proposed %s needs risk %d > %d — re-routing through policy",
+                            state.get('ticket_id'), result.tool_name, needed, ctx.assessed_risk)
+                return {"assessed_risk": needed, "next_agent": "policy", "risk_rerouted": True}
             try:
                 call = authorize(result.tool_name, result.tool_args, ctx)
             except ToolPolicyViolation as e:
@@ -262,7 +293,7 @@ async def draft_plan_node(state: AgentState, config: RunnableConfig) -> dict:
 
     _, llm_super = get_llms()
     mcp_client: MCPToolClient = config["configurable"]["mcp_client"]
-    ctx_if_approved = _tool_context(state, human_approved=True)
+    ctx_if_approved = _tool_context(state, await _monitored_services(state), human_approved=True)
     prompt = f"""
     You are the Execution Agent. The ticket is Risk 3 and has passed Compliance.
     Draft a proposed_plan for human review. DO NOT execute.

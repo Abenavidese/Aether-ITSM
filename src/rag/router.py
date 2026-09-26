@@ -3,6 +3,7 @@ Knowledge-base endpoints. Everything written here is later read by the
 agents as prompt context, so uploads are validated (ingest_guard.py),
 redacted and tagged (service.py), rate-limited and audited (Fase 11.5).
 """
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -49,8 +50,11 @@ async def upload_document(
     stored = None
     try:
         stored = await store_upload(file, UPLOAD_DIR, settings.knowledge_upload_max_bytes)
-        validate_content(stored, settings.knowledge_upload_max_pdf_pages)
-        report = ingest_file(
+        # PDF parsing and embedding a whole document take seconds of blocking
+        # I/O and CPU: worker threads, never the event loop (roadmap 2.1).
+        await asyncio.to_thread(validate_content, stored, settings.knowledge_upload_max_pdf_pages)
+        report = await asyncio.to_thread(
+            ingest_file,
             tenant_id=current_user.company_id,
             file_path=stored.path,
             filename=stored.filename,
@@ -64,7 +68,8 @@ async def upload_document(
         if stored:
             discard(stored.path)
 
-    record_knowledge_event(
+    await asyncio.to_thread(
+        record_knowledge_event,
         current_user.company_id, current_user.id, "upload", stored.filename, source_type=source_type.value,
         sha256=stored.sha256, size_bytes=stored.size_bytes, report=report,
     )

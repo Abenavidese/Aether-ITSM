@@ -1,5 +1,10 @@
 import logging
+import time
+from datetime import datetime, timezone
+
 from langchain_core.messages import HumanMessage
+
+from src.observability.tracing import record_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +36,19 @@ async def invoke_structured(llm, schema, messages: list, max_retries: int = MAX_
     current_messages = list(messages)
     last_error = None
 
+    model = getattr(llm, "model", None) or getattr(llm, "model_name", None)
     for attempt in range(max_retries + 1):
-        raw_result = await structured_llm.ainvoke(current_messages)
+        started, started_at = time.perf_counter(), datetime.now(timezone.utc)
+        try:
+            raw_result = await structured_llm.ainvoke(current_messages)
+        except Exception:
+            record_llm_call(schema.__name__, model, started, started_at, None, ok=False)
+            raise
         parsed = raw_result.get("parsed")
+        # Every attempt costs tokens, including the ones that fail validation.
+        raw_message = raw_result.get("raw")
+        record_llm_call(schema.__name__, model, started, started_at,
+                        getattr(raw_message, "usage_metadata", None), ok=parsed is not None)
         if parsed is not None:
             return parsed
 

@@ -84,6 +84,7 @@ Tareas:
 ## 2. Robustez y arquitectura senior
 
 ### 2.1 El servidor se bloquea mientras atiende un chat
+**Estado: HECHO (2026-09-26).** Ver Fase 12 en `docs/PLAN_IMPLEMENTACION.txt`.
 `/chat`, `/webhook/ticket` y `/approve` son `async def`, pero usan una sesión de
 SQLAlchemy síncrona. Además, el Concierge y los nodos llaman de forma síncrona a:
 - `retrieve_context` (embeddings por HTTP + consulta a pgvector);
@@ -100,6 +101,7 @@ para **todos** los usuarios.
 (mockeado a 3 s), `GET /health` responde en menos de 100 ms.
 
 ### 2.2 Cola de trabajos en vez de `BackgroundTasks`
+**Estado: HECHO (2026-09-26).** Cola sobre Postgres/SQLite (`src/jobs/`), sin Redis.
 Hoy el agente corre en `BackgroundTasks` dentro del proceso de la API. Si el
 server se reinicia o se redespliega, esos tickets se pierden. Tampoco hay
 reintentos ni límite de concurrencia (30 webhooks por minuto pueden lanzar 30
@@ -117,6 +119,7 @@ corridas del 8B al mismo tiempo).
 - Una caída temporal de GitHub no pierde el issue.
 
 ### 2.3 Evaluación del LLM
+**Estado: HECHO (2026-09-26).** `evals/`; el gate de umbrales corre con `evals.run --fail-under` (CI no tiene modelos: ahí corren los tests del harness).
 Es lo que más distingue un proyecto de IA serio: medir en vez de adivinar.
 
 - Dataset "golden" versionado (`evals/`) con más de 50 casos:
@@ -140,6 +143,7 @@ Es lo que más distingue un proyecto de IA serio: medir en vez de adivinar.
 - CI falla si la precisión de riesgo baja del umbral acordado.
 
 ### 2.4 Observabilidad y costo
+**Estado: HECHO (2026-09-26).** Tracing propio (tabla `agent_spans`), no OpenTelemetry; la heurística de ahorro (8.4) sigue en el dashboard, al lado del panel de uso real.
 - Trazas por ticket y por turno de chat (OpenTelemetry o LangSmith), con un span
   por nodo del grafo.
 - Tokens y costo por tenant y por modelo, a partir de `usage_metadata` de
@@ -154,6 +158,7 @@ Es lo que más distingue un proyecto de IA serio: medir en vez de adivinar.
 - El dashboard muestra tokens y costo del mes por tenant a partir de datos reales.
 
 ### 2.5 Row-Level Security en Postgres
+**Estado: HECHO en código y validado en un Neon temporal (2026-09-26). NO aplicado a Supabase** (`scripts/apply_rls.py` + `DB_RLS_ENABLED=true` cuando lo decidas).
 Hoy el aislamiento entre tenants depende solo de filtrar por `tenant_id` en
 cada consulta. RLS lo agrega como segunda capa a nivel de base de datos, así un
 filtro olvidado no expone datos de otra empresa.
@@ -163,6 +168,7 @@ el `tenant_id` de sesión fijado, no devuelve filas de otro tenant (test contra
 Postgres).
 
 ### 2.6 Refactor de `src/agent/concierge.py` (747 líneas)
+**Estado: HECHO (2026-09-26).** Paquete `src/agent/concierge/`.
 Separar en módulos con responsabilidades claras:
 - navegación del repo (árbol, rutas, lectura de archivos);
 - diagnóstico de servicios;

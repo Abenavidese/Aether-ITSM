@@ -71,6 +71,27 @@ class Settings(BaseSettings):
     knowledge_upload_max_pdf_pages: int = 300
     knowledge_rate_limit: str = "10/minute"
 
+    # ── Row-Level Security (roadmap 2.5) ──
+    # Turn on only after src/db/rls/enable.sql was applied to the database
+    # (scripts/apply_rls.py): tenant-scoped sessions then SET ROLE aether_tenant.
+    db_rls_enabled: bool = False
+
+    # ── Observability (roadmap 2.4) ──
+    log_format: str = Field(default="text", description="text | json")
+    # USD per 1M tokens, per model id: {"model": [input_price, output_price]}.
+    # Local Ollama models cost nothing and are simply absent (cost 0). Fill in
+    # the real Nebius/OpenAI prices of YOUR contract — they are not guessed here.
+    llm_prices_json: str = "{}"
+
+    # ── Background jobs (roadmap 2.2) ──
+    # Embedded: the API process also drains the queue (dev default). Set
+    # false and run `python -m src.jobs.worker` to scale/restart separately.
+    jobs_embedded_worker: bool = True
+    jobs_concurrency: int = 2
+    jobs_poll_seconds: float = 1.0
+    # A running job with no heartbeat for this long is presumed dead and requeued.
+    jobs_visibility_timeout_seconds: float = 600.0
+
     # ── Outbound requests (Fase 11.4) ──
     # Healthchecks may only target publicly routable hosts. Set True only for
     # a self-hosted deployment that must monitor intranet services; cloud

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
@@ -5,24 +6,26 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.agent.checkpointer import open_checkpointer
 from src.agent.mcp_client import MCPToolClient
+from src.jobs.worker import WorkerDeps
+from src.tickets.jobs import build_worker
 from src.api.routes import router as webhook_router
 from src.auth.router import router as auth_router
 from src.tenant.router import router as tenant_router
 from src.tenant.user_router import router as user_router
 from src.rag.router import router as rag_router
 from src.integrations.logs.router import router as log_drain_router
+from src.observability.router import router as observability_router
 from src.db.database import engine
 from src.db import models
+from src.db import tenant_scope  # noqa: F401 — registers the RLS session listener (roadmap 2.5)
 from src.config import get_settings
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from src.observability.logging import RequestIdMiddleware, configure_logging
 
 settings = get_settings()
+
+# Every line carries request_id / trace_id (roadmap 2.4); LOG_FORMAT=json for log backends.
+configure_logging(settings.log_format)
+logger = logging.getLogger(__name__)
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -113,11 +116,21 @@ async def lifespan(app: FastAPI):
         logger.info("Starting MCP tool server subprocess")
         mcp_client = MCPToolClient()
         await mcp_client.connect()
+        stop_worker = asyncio.Event()
+        worker_task = None
         try:
             app.state.checkpointer = checkpointer
             app.state.mcp_client = mcp_client
+            if settings.jobs_embedded_worker:
+                # Same queue a standalone `python -m src.jobs.worker` drains;
+                # embedded is just the zero-setup option for development.
+                worker = build_worker(WorkerDeps(checkpointer, mcp_client), settings)
+                worker_task = asyncio.create_task(worker.run_forever(stop_worker))
             yield
         finally:
+            stop_worker.set()
+            if worker_task:
+                await worker_task
             await mcp_client.close()
     logger.info("Shut down checkpointer and MCP tool server")
 
@@ -136,6 +149,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, lambda req, exc: Response(content="Rate limit exceeded", status_code=429))
 app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 # Configure CORS for frontend access
 app.add_middleware(
@@ -152,6 +166,7 @@ app.include_router(tenant_router, prefix="/api")
 app.include_router(user_router, prefix="/api")
 app.include_router(rag_router, prefix="/api")
 app.include_router(log_drain_router, prefix="/api")
+app.include_router(observability_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():

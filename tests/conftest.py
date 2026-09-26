@@ -1,4 +1,5 @@
 import os
+import sys
 
 # Must run before ANY test module imports src.* — src.config caches settings
 # and src.db.database builds its engine at import time, so whichever test
@@ -9,8 +10,14 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_app.db"
 os.environ["USE_OLLAMA"] = "True"
 os.environ["OLLAMA_MODEL"] = "llama3.1"
 os.environ["CHECKPOINT_DB_PATH"] = "test_checkpoints.db"
+# Tests drive queue jobs explicitly (JobWorker.run_once); a background worker
+# would race them and need a live model.
+os.environ["JOBS_EMBEDDED_WORKER"] = "False"
 
 import pytest  # noqa: E402
+
+# Shared test doubles (tests/fakes.py) importable from every test directory.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 @pytest.fixture(autouse=True)

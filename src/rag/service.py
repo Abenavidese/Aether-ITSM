@@ -9,6 +9,7 @@ from langchain_postgres import PGVector
 from langchain_core.documents import Document
 from src.rag.embeddings import get_embeddings
 from src.config import get_settings
+from src.db.tenant_scope import tenant_session
 from src.security.prompt_safety import find_injection_markers
 from src.security.redaction import redact_document
 
@@ -58,8 +59,8 @@ def _load_text(file_path: str) -> tuple[str, list[tuple[int, int]] | None]:
 
 def _existing_chunk_ids(tenant_id: str, filename: str) -> list[str]:
     from sqlalchemy import text
-    from src.db.database import engine
-    with engine.connect() as conn:
+    # Tenant-scoped session: under RLS the database enforces the filter too (roadmap 2.5).
+    with tenant_session(tenant_id) as conn:
         try:
             rows = conn.execute(text("""
                 SELECT id FROM langchain_pg_embedding
@@ -183,8 +184,8 @@ def get_uploaded_files(tenant_id: str) -> List[dict]:
     # we can do a generic similarity search with a blank query to get recent docs, or ideally
     # query the database directly. For simplicity, we will query via SQLAlchemy.
     from sqlalchemy import text
-    from src.db.database import engine
-    with engine.connect() as conn:
+    # Tenant-scoped session: under RLS the database enforces the filter too (roadmap 2.5).
+    with tenant_session(tenant_id) as conn:
         # Langchain-postgres uses `langchain_pg_embedding` table and stores metadata in `cmetadata`
         try:
             query = text("""
@@ -202,8 +203,8 @@ def get_uploaded_files(tenant_id: str) -> List[dict]:
 def delete_file(tenant_id: str, filename: str):
     """Deletes all chunks associated with a specific file for a tenant."""
     from sqlalchemy import text
-    from src.db.database import engine
-    with engine.connect() as conn:
+    # Tenant-scoped session: under RLS the database enforces the filter too (roadmap 2.5).
+    with tenant_session(tenant_id) as conn:
         query = text("""
             DELETE FROM langchain_pg_embedding 
             WHERE cmetadata->>'tenant_id' = :tenant_id

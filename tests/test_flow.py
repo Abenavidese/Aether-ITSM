@@ -102,13 +102,8 @@ def test_health_check():
     assert response.json()["status"] == "ok"
 
 def test_webhook_receives_tickets(seeded_company, monkeypatch):
-    # Starlette runs BackgroundTasks synchronously inside the request/response
-    # cycle, so without this the webhook test would need a live Ollama server
-    # to actually classify/execute each ticket — that live-model path is
-    # scripts/e2e_ollama.py's job (Fase 1.3), not this fast pytest suite's.
-    async def _noop_agent(*args, **kwargs):
-        pass
-    monkeypatch.setattr("src.api.routes.run_agent_background", _noop_agent)
+    # The webhook only enqueues the agent run (no worker runs in tests; the
+    # live-model path is scripts/e2e_ollama.py's job).
 
     _, api_key = seeded_company
     tickets = load_test_tickets()
@@ -155,12 +150,12 @@ def test_chat_resolved_in_one_turn(seeded_company, monkeypatch):
     _login_as(load_test_tickets()[0]["user_email"])
     fake_result = ConciergeResult(response_text="Cleared your VPN session.", resolved=True)
     monkeypatch.setattr(
-        "src.agent.concierge.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
+        "src.agent.concierge.node.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
     )
     # RAG needs a real Postgres+pgvector store (see docs/architecture.md) —
     # out of scope for this sqlite-backed suite; retrieve_context is
     # exercised for real by scripts/e2e_ollama.py against Supabase.
-    monkeypatch.setattr("src.agent.concierge.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
 
     response = client.post("/api/chat", json={"message": "my vpn is down"})
     assert response.status_code == 200
@@ -173,10 +168,9 @@ def test_chat_escalates_to_ticket(seeded_company, monkeypatch):
     _login_as(load_test_tickets()[1]["user_email"])
     fake_result = ConciergeResult(response_text="Opening a ticket for you.", resolved=False)
     monkeypatch.setattr(
-        "src.agent.concierge.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
+        "src.agent.concierge.node.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
     )
-    monkeypatch.setattr("src.agent.concierge.retrieve_context", lambda *a, **kw: "")
-    monkeypatch.setattr("src.api.routes.run_agent_background", lambda *a, **kw: None)
+    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
 
     response = client.post("/api/chat", json={"message": "I need admin access to prod DB"})
     assert response.status_code == 200
@@ -332,7 +326,7 @@ def _setup_platform_logs(monkeypatch, company_id, result, suspended=False, http_
 
     async def fake_health(url):
         return {"status": "success", "available": http_status < 500, "http_status": http_status}
-    monkeypatch.setattr("src.agent.concierge._health_checker", lambda mcp: fake_health)
+    monkeypatch.setattr("src.agent.concierge.node._health_checker", lambda mcp: fake_health)
 
     tree = [{"path": "backend/src/controllers/cartController.js", "type": "file"}]
 
@@ -343,13 +337,12 @@ def _setup_platform_logs(monkeypatch, company_id, result, suspended=False, http_
     async def fake_files(tenant_id, files):
         read_files.extend(files)
         return "\n".join(f"=== {f} (COMPLETE FILE, 1 lines) ===\n  11 | const id = req.user.id;" for f in files)
-    monkeypatch.setattr("src.agent.concierge._fetch_repo_tree", fake_tree)
-    monkeypatch.setattr("src.agent.concierge._file_contents_context", fake_files)
-    monkeypatch.setattr("src.agent.concierge.retrieve_context", lambda *a, **kw: "")
-    monkeypatch.setattr("src.api.routes.run_agent_background", lambda *a, **kw: None)
+    monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", fake_tree)
+    monkeypatch.setattr("src.agent.concierge.node._file_contents_context", fake_files)
+    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
 
     llm = _RecordingLLM(result)
-    monkeypatch.setattr("src.agent.concierge.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
     return requests, llm, read_files
 
 
@@ -564,13 +557,13 @@ def test_chat_diagnoses_a_vercel_service_from_drained_logs(seeded_company, monke
 
     async def fake_health(url):
         return {"status": "success", "available": True, "http_status": 200}
-    monkeypatch.setattr("src.agent.concierge._health_checker", lambda mcp: fake_health)
+    monkeypatch.setattr("src.agent.concierge.node._health_checker", lambda mcp: fake_health)
     async def no_tree(tenant_id):
         return []
-    monkeypatch.setattr("src.agent.concierge._fetch_repo_tree", no_tree)
-    monkeypatch.setattr("src.agent.concierge.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", no_tree)
+    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
     llm = _RecordingLLM(ConciergeResult(response_text="El carrito falla.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
 
     body = client.post("/api/chat", json={"message": "la tienda no carga el carrito"}).json()
     assert "🟠 Estado de Storefront: DEGRADADO" in body["reply"]

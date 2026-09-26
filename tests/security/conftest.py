@@ -1,7 +1,7 @@
-"""Fixtures for the Fase 11 security suite (fakes live in sec_fakes.py)."""
+"""Fixtures for the Fase 11 security suite (fakes live in tests/fakes.py)."""
 import pytest
 
-from sec_fakes import RecordingMCP
+from fakes import RecordingMCP
 
 
 @pytest.fixture
@@ -11,7 +11,7 @@ def mcp():
 
 @pytest.fixture
 def no_rag(monkeypatch):
-    for target in ("src.agent.nodes.retrieve_context", "src.agent.concierge.retrieve_context"):
+    for target in ("src.agent.nodes.retrieve_context", "src.agent.concierge.node.retrieve_context"):
         monkeypatch.setattr(target, lambda *a, **kw: "")
 
 
@@ -19,7 +19,7 @@ def no_rag(monkeypatch):
 def monitored(monkeypatch):
     """One configured healthcheck target for every tenant."""
     services = [{"name": "Tienda", "url": "https://shop.example.com/health"}]
-    for target in ("src.agent.nodes.get_monitored_services", "src.agent.concierge.get_monitored_services"):
+    for target in ("src.agent.nodes.get_monitored_services", "src.agent.concierge.node.get_monitored_services"):
         monkeypatch.setattr(target, lambda tenant_id: services)
     return services
 

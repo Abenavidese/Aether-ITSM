@@ -1,4 +1,6 @@
 from langgraph.graph import StateGraph, START, END
+from src.observability.tracing import traced_node
+
 from .state import AgentState
 from .nodes import supervisor_node, policy_agent_node, execution_agent_node, draft_plan_node, escalate_node
 
@@ -26,6 +28,8 @@ def route_from_execution(state: AgentState) -> str:
     """
     if state.get("technical_error") or state.get("action_refused"):
         return "escalate"
+    if state.get("next_agent") == "policy":
+        return "policy"  # risk raised by the proposed tool: compliance check first
 
     return "end"
 
@@ -54,11 +58,12 @@ def get_workflow() -> StateGraph:
     workflow = StateGraph(AgentState)
     
     # Add Async Swarm Nodes
-    workflow.add_node("supervisor", supervisor_node)
-    workflow.add_node("policy", policy_agent_node)
-    workflow.add_node("execution", execution_agent_node)
-    workflow.add_node("draft_plan", draft_plan_node)
-    workflow.add_node("escalate", escalate_node)
+    # Each node is timed into the run's trace (src/observability/tracing.py).
+    for name, node in (
+        ("supervisor", supervisor_node), ("policy", policy_agent_node), ("execution", execution_agent_node),
+        ("draft_plan", draft_plan_node), ("escalate", escalate_node),
+    ):
+        workflow.add_node(name, traced_node(name, node))
     
     # START -> Supervisor
     workflow.add_edge(START, "supervisor")
@@ -91,6 +96,7 @@ def get_workflow() -> StateGraph:
         route_from_execution,
         {
             "escalate": "escalate",
+            "policy": "policy",
             "end": END
         }
     )

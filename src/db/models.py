@@ -176,3 +176,55 @@ class KnowledgeAudit(Base):
     chunks = Column(Integer, nullable=True)
     injection_flags = Column(String, nullable=True)  # comma-separated heuristic names
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Job(Base):
+    """
+    Durable work queue (roadmap 2.2) — replaces in-process BackgroundTasks,
+    which lost every in-flight ticket on a restart/redeploy and had no
+    retries or concurrency limit. Lives in the same database, so a ticket
+    and its job are written in ONE transaction (transactional outbox): there
+    is never a ticket nobody will process, nor a job for a ticket that
+    doesn't exist. See src/jobs/queue.py for the claim/retry protocol.
+    """
+    __tablename__ = "jobs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    kind = Column(String, nullable=False, index=True)
+    payload = Column(String, nullable=False)                   # JSON
+    status = Column(String, nullable=False, default="queued", index=True)  # queued|running|done|dead
+    attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    run_after = Column(DateTime(timezone=True), nullable=False, index=True)
+    locked_by = Column(String, nullable=True)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(String, nullable=True)
+    # Same logical work enqueued twice (webhook retry, double escalation) is one job.
+    dedupe_key = Column(String, nullable=True, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AgentSpan(Base):
+    """
+    One timed step of an agent run (roadmap 2.4): a graph node, or a single
+    LLM call with its token usage. trace_id groups a whole run ("ticket:<id>"
+    or "chat:<turn id>"), so a ticket's full path — supervisor -> policy ->
+    ... with each model call inside — can be replayed, and tokens/cost and
+    per-node latency (p95) can be aggregated per tenant. Never stores prompt
+    or completion text.
+    """
+    __tablename__ = "agent_spans"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("companies.id"), nullable=True, index=True)
+    trace_id = Column(String, nullable=False, index=True)
+    source = Column(String, nullable=False)                  # ticket | chat | eval
+    kind = Column(String, nullable=False)                    # node | llm
+    name = Column(String, nullable=False)                    # node name, or output schema for llm
+    model = Column(String, nullable=True)
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    duration_ms = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="ok")    # ok | error
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)

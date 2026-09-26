@@ -7,7 +7,7 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
-from sec_fakes import ScriptedLLM
+from fakes import ScriptedLLM
 
 from src.agent.concierge import concierge_node
 from src.agent.context_budget import build_prompt, estimate_tokens
@@ -71,10 +71,10 @@ def test_concierge_fences_repo_file_contents(monkeypatch, mcp, no_rag, monitored
 
     async def fake_files(tenant_id, files):
         return f"=== backend/src/auth.js (COMPLETE FILE, 1 lines) ===\n   1 | // {INJECTION}"
-    monkeypatch.setattr("src.agent.concierge._fetch_repo_tree", fake_tree)
-    monkeypatch.setattr("src.agent.concierge._file_contents_context", fake_files)
+    monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", fake_tree)
+    monkeypatch.setattr("src.agent.concierge.node._file_contents_context", fake_files)
     llm = ScriptedLLM(ConciergeResult(response_text="auth.js tiene un comentario sospechoso.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
     asyncio.run(concierge_node(_chat_state("revisa auth.js"), {"configurable": {"mcp_client": mcp}}))
     assert re.search(r'<untrusted_data id="[0-9a-f]{8}" source="repo_files">', llm.prompts[0])
 
@@ -179,7 +179,7 @@ def test_code_redaction_keeps_code_readable():
 
 def test_concierge_reply_never_shows_a_secret(monkeypatch, mcp, no_rag, monitored):
     llm = ScriptedLLM(ConciergeResult(response_text="La clave es AKIAABCDEFGHIJKLMNOP", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
     out = asyncio.run(concierge_node(_chat_state("cuál es la clave de aws?"), {"configurable": {"mcp_client": mcp}}))
     assert "AKIA" not in out["final_response"]
 

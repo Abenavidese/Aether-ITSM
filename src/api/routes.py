@@ -1,32 +1,31 @@
+"""
+Agent-facing HTTP endpoints: ticket webhook, human approval, employee chat.
+
+Thin by design (roadmap 2.1/2.2): validation and HTTP mapping live here;
+database work is in src/tickets/service.py (sync, run in worker threads so
+it never blocks the event loop) and agent runs for tickets go through the
+durable job queue (src/tickets/jobs.py) instead of in-process BackgroundTasks.
+"""
+import asyncio
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends, Header
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field, field_validator
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel, Field, field_validator
+
 from src.agent.concierge import get_concierge_workflow
-from src.agent.graph import get_workflow
-from src.db.database import get_db, SessionLocal
-from src.db.models import Company, User, Ticket
-from src.security.deps import get_current_user
-from src.security.api_keys import hash_api_key
-from src.security.encryption import encrypt_token, decrypt_token
-from src.security.limiter import limiter, user_or_ip_key
 from src.config import get_settings
-from src.integrations.github import create_issue
-from src.integrations.issue_format import build_escalation_issue
+from src.db.models import User
+from src.security.deps import get_current_user
+from src.security.limiter import limiter, user_or_ip_key
+from src.tickets import service
+from src.observability.tracing import trace_scope
+from src.tickets.jobs import awaiting_approval, ticket_graph, ticket_thread_config, ticket_trace_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# Placeholder ROI heuristic applied to every autonomously-resolved ticket.
-# Real per-category handle-time/labor-rate figures belong in SubscriptionPlan
-# or a tenant setting once we have data to back them — these keep the
-# dashboard pipeline honest end-to-end without pretending to be precise.
-AUTONOMOUS_RESOLUTION_MINUTES_SAVED = 15
-AUTONOMOUS_RESOLUTION_COST_SAVED_USD = 12.50
 
 
 # Input limits (Fase 11.6): every field below ends up in an LLM prompt, a DB
@@ -53,283 +52,55 @@ class TicketPayload(BaseModel):
             raise ValueError("image_base64 must be a data:image/(png|jpeg|webp);base64 URI")
         return v
 
+
 class ApprovalPayload(BaseModel):
     approved: bool
     approver_id: str
 
 
-def _month_start() -> datetime:
-    now = datetime.now(timezone.utc)
-    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-
-def _is_escalated(values: dict) -> bool:
-    """True for every state shape that routes to escalate_node (see graph.py)."""
-    return (
-        bool(values.get("technical_error"))
-        or bool(values.get("action_refused"))
-        or values.get("compliance_passed") is False
-        or values.get("human_approved") is False
-        or values.get("assessed_risk") == 4
-    )
-
-
-async def _create_escalation_issue(db: Session, ticket: Ticket, values: dict) -> str | None:
-    """
-    Creates a GitHub Issue for an escalated ticket so the engineering team
-    gets a real, actionable artifact — not just a status flag nobody looks
-    at. Deliberately NOT an LLM-decided action (no tool_name for this in
-    ExecutionPlanResult): escalation always creates an issue when GitHub is
-    configured, regardless of what any node "decided" to do.
-
-    Returns None (never raises) whenever an issue can't be created — a
-    tenant that hasn't connected GitHub yet, an expired/undecryptable
-    token, or a GitHub API failure must never block the ticket from being
-    marked escalated.
-    """
-    company = db.query(Company).filter(Company.id == ticket.tenant_id).first()
-    if not company or not company.github_token or not company.github_repo:
-        return None
-
-    token = decrypt_token(company.github_token)
-    if not token:
-        logger.warning("Could not decrypt github_token for company %s; skipping issue creation", ticket.tenant_id)
-        return None
-
-    # Untrusted user text + LLM output, going to a possibly public repo:
-    # redacted and rendered inert (see issue_format.py).
-    title, body = build_escalation_issue(
-        ticket.external_id, ticket.title, ticket.description,
-        values.get("final_resolution"), values.get("compliance_notes"),
-    )
-
-    try:
-        return await create_issue(company.github_repo, token, title, body)
-    except Exception as e:
-        logger.error("Failed to create GitHub issue for ticket %s: %s", ticket.external_id, e, exc_info=True)
-        return None
-
-
-async def _sync_ticket_from_snapshot(db: Session, ticket: Ticket, snapshot) -> None:
-    """Reflects the graph's final (or paused) state onto the persisted Ticket row."""
-    if snapshot is None:
-        return
-
-    if snapshot.next:
-        # Still paused (e.g. draft_plan waiting on human approval).
-        ticket.status = "pending_human"
-        ticket.resolution_path = None
-        # What the admin approves must be visible to them (Fase 11.2): the
-        # plan text ends with the exact action that will run.
-        ticket.proposed_plan = snapshot.values.get("proposed_plan")
-        db.commit()
-        return
-
-    values = snapshot.values
-    if _is_escalated(values):
-        ticket.status = "escalated"
-        ticket.resolution_path = None
-        ticket.github_issue_url = await _create_escalation_issue(db, ticket, values)
-    else:
-        ticket.status = "resolved"
-        ticket.resolution_path = "human" if values.get("human_approved") is True else "autonomous"
-        ticket.resolved_at = datetime.now(timezone.utc)
-        ticket.estimated_time_saved_minutes = AUTONOMOUS_RESOLUTION_MINUTES_SAVED
-        ticket.cost_saved_usd = AUTONOMOUS_RESOLUTION_COST_SAVED_USD
-
-    db.commit()
-
-
-async def run_agent_background(payload: TicketPayload, company_id: str, ticket_id: str, checkpointer, mcp_client):
-    """Async background task to execute the LangGraph agent."""
-    logger.info("Starting ASYNC agent for ticket %s (tenant %s)", payload.ticket_id, company_id)
-
-    text_content = f"Title: {payload.summary}\n\nDescription: {payload.description}"
-
-    if payload.image_base64:
-        content = [
-            {"type": "text", "text": text_content},
-            {"type": "image_url", "image_url": {"url": payload.image_base64}}
-        ]
-    else:
-        content = text_content
-
-    initial_state = {
-        "messages": [HumanMessage(content=content)],
-        "ticket_id": payload.ticket_id,
-        "company_id": company_id,
-        "user_context": {"email": payload.user_email, "tenant_id": company_id},
-        "assessed_risk": 4,
-        "intent": "unknown"
-    }
-
-    # Namespace the thread by tenant so ticket IDs can never collide or be
-    # resumed across companies (see approve_ticket for the matching check).
-    # mcp_client rides along in `configurable` — the same LangGraph mechanism
-    # already used for thread_id — so execution_agent_node can dispatch real
-    # tool calls without reaching into any module-level global.
-    config = {"configurable": {"thread_id": f"{company_id}:{payload.ticket_id}", "mcp_client": mcp_client}}
-    app = get_workflow().compile(
-        checkpointer=checkpointer,
-        interrupt_after=["draft_plan"]
-    )
-
-    db = SessionLocal()
-    try:
-        async for step in app.astream(initial_state, config=config):
-            for node_name, state_update in step.items():
-                logger.info("--- Node '%s' finished (ASYNC) ---", node_name)
-
-        logger.info("Graph execution finished or paused for %s", payload.ticket_id)
-
-        snapshot = await app.aget_state(config)
-        ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-        if ticket:
-            await _sync_ticket_from_snapshot(db, ticket, snapshot)
-
-    except Exception as e:
-        logger.error("Failed executing graph: %s", e, exc_info=True)
-        try:
-            ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-            if ticket:
-                ticket.status = "escalated"
-                db.commit()
-        except Exception:
-            logger.error("Also failed to mark ticket %s as escalated after a crash", ticket_id, exc_info=True)
-    finally:
-        db.close()
-
-async def _create_and_dispatch_ticket(
-    db: Session, company: Company, user: User, external_id: str, title: str, description: str,
-    background_tasks: BackgroundTasks, checkpointer, mcp_client,
-) -> Ticket:
-    """
-    Persists a new Ticket and dispatches the full agent swarm in the
-    background — shared by the webhook (Fase 0) and the chat Concierge's
-    escalation path (Fase 5) so both funnel every ticket through the same
-    monthly AI-resolution plan limit and the same background execution.
-    Callers own their own monthly TICKET-count limit check beforehand (their
-    error handling differs: the webhook rejects with 402, chat just degrades
-    to a plain reply) — this only owns what happens once a ticket may exist.
-    """
-    ticket = Ticket(
-        tenant_id=company.id, user_id=user.id, external_id=external_id,
-        title=title, description=description, status="open",
-    )
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-
-    plan = company.plan
-    if plan:
-        ai_resolutions_this_month = db.query(Ticket).filter(
-            Ticket.tenant_id == company.id,
-            Ticket.created_at >= _month_start(),
-            Ticket.resolution_path.isnot(None),
-        ).count()
-        if ai_resolutions_this_month >= plan.max_ai_resolutions_per_month:
-            # Ticket is logged, but this plan is out of AI resolutions for the
-            # period — route straight to the human queue instead of invoking
-            # the agent at all.
-            ticket.status = "pending_human"
-            db.commit()
-            return ticket
-
-    payload = TicketPayload(ticket_id=external_id, summary=title, description=description, user_email=user.email)
-    background_tasks.add_task(run_agent_background, payload, company.id, ticket.id, checkpointer, mcp_client)
-    return ticket
+class ChatPayload(BaseModel):
+    message: str = Field(..., min_length=1, max_length=get_settings().chat_message_max_chars)
 
 
 @router.post("/webhook/ticket", status_code=202)
 @limiter.limit("30/minute")
-async def receive_ticket_webhook(
-    payload: TicketPayload,
-    background_tasks: BackgroundTasks,
-    request: Request,
-    x_api_key: str = Header(...),
-    db: Session = Depends(get_db)
-):
+def receive_ticket_webhook(payload: TicketPayload, request: Request, x_api_key: str = Header(...)):
     """
-    Receives a ticket from ITSM/SDK integrations.
-    Uses FastAPI BackgroundTasks which will schedule our async function in the event loop.
+    Receives a ticket from ITSM/SDK integrations. Answers 202 at once: the
+    ticket and its agent-run job are committed together and a queue worker
+    picks it up (ITSM platforms expect a reply within a few seconds, an
+    agent run takes tens of seconds). A plain `def`: FastAPI runs it in a
+    worker thread, since all it does is database work.
     """
-    company = db.query(Company).filter(Company.api_key_hash == hash_api_key(x_api_key)).first()
-    if not company:
-        # Legacy rows created before API keys were hashed still hold the raw
-        # key in `api_key`. Fall back once, then migrate the row in place so
-        # this branch is never needed again for that tenant.
-        company = db.query(Company).filter(Company.api_key == x_api_key).first()
-        if company:
-            company.api_key_hash = hash_api_key(x_api_key)
-            company.api_key = encrypt_token(x_api_key)
-            db.commit()
-
-    if not company:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
-
-    # Idempotency: ITSM/webhook senders retry on timeouts. Re-delivering the
-    # same ticket_id must not re-run (and potentially re-execute) the agent.
-    existing_ticket = db.query(Ticket).filter(
-        Ticket.tenant_id == company.id, Ticket.external_id == payload.ticket_id
-    ).first()
-    if existing_ticket:
-        return {
-            "status": "Accepted",
-            "message": "Ticket already received; not reprocessing.",
-            "ticket_id": payload.ticket_id
-        }
-
-    # Every employee must have an Aether account for the SDK integration —
-    # tickets are always attributed to a real, provisioned User, never a
-    # bare email string.
-    user = db.query(User).filter(
-        User.email == payload.user_email, User.company_id == company.id
-    ).first()
-    if not user:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"No Aether account found for '{payload.user_email}' in this company. "
-                "Add them under Settings > Users before creating tickets on their behalf."
-            ),
+    try:
+        accepted = service.accept_webhook_ticket(
+            x_api_key, payload.ticket_id, payload.summary, payload.description, payload.user_email,
+            payload.image_base64,
         )
+    except service.InvalidApiKey:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    except service.UnknownEmployee as e:
+        raise HTTPException(status_code=404, detail=(
+            f"No Aether account found for '{e.email}' in this company. "
+            "Add them under Settings > Users before creating tickets on their behalf."
+        ))
+    except service.TicketLimitReached as e:
+        raise HTTPException(status_code=402, detail=f"Monthly ticket limit reached for your plan ({e.limit}).")
 
-    plan = company.plan
-    month_start = _month_start()
+    if accepted.duplicate:
+        message = "Ticket already received; not reprocessing."
+    elif accepted.routed_to_humans:
+        message = "Monthly AI resolution limit reached; ticket routed to the human queue."
+    else:
+        message = "Aether is reviewing the ticket asynchronously."
+    return {"status": "Accepted", "message": message, "ticket_id": payload.ticket_id}
 
-    if plan:
-        tickets_this_month = db.query(Ticket).filter(
-            Ticket.tenant_id == company.id, Ticket.created_at >= month_start
-        ).count()
-        if tickets_this_month >= plan.max_tickets_per_month:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Monthly ticket limit reached for your plan ({plan.max_tickets_per_month}).",
-            )
-
-    ticket = await _create_and_dispatch_ticket(
-        db, company, user, payload.ticket_id, payload.summary, payload.description,
-        background_tasks, request.app.state.checkpointer, request.app.state.mcp_client,
-    )
-    if ticket.status == "pending_human":
-        return {
-            "status": "Accepted",
-            "message": "Monthly AI resolution limit reached; ticket routed to the human queue.",
-            "ticket_id": payload.ticket_id
-        }
-
-    return {
-        "status": "Accepted",
-        "message": "Aether is reviewing the ticket asynchronously.",
-        "ticket_id": payload.ticket_id
-    }
 
 @router.post("/approve/{ticket_id}")
 async def approve_ticket(
     ticket_id: str,
     payload: ApprovalPayload,
     request: Request,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -338,58 +109,41 @@ async def approve_ticket(
     The thread is namespaced by the caller's own company_id, so a user can
     only ever address threads belonging to their own tenant — a different
     tenant's ticket_id simply resolves to a thread that doesn't exist here.
+    Resuming runs inline: after approval, execution is the frozen action
+    (no LLM call, Fase 11.2) or an escalation, both fast.
     """
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
 
-    thread_id = f"{current_user.company_id}:{ticket_id}"
-    config = {"configurable": {"thread_id": thread_id, "mcp_client": request.app.state.mcp_client}}
-    checkpointer = request.app.state.checkpointer
+    app = ticket_graph(request.app.state.checkpointer)
+    config = ticket_thread_config(current_user.company_id, ticket_id, request.app.state.mcp_client)
 
-    app = get_workflow().compile(
-        checkpointer=checkpointer,
-        interrupt_after=["draft_plan"]
-    )
-
-    # Check state asynchronously
     state = await app.aget_state(config)
-    if not state or not state.next:
-        raise HTTPException(status_code=404, detail="Thread not found or not waiting for approval.")
-
     # Defense in depth: even if the thread namespace were ever bypassed
     # (e.g. a future checkpointer migration), refuse cross-tenant resumption.
-    if state.values.get("company_id") != current_user.company_id:
+    if not state or not awaiting_approval(state) or state.values.get("company_id") != current_user.company_id:
         raise HTTPException(status_code=404, detail="Thread not found or not waiting for approval.")
 
-    logger.info("Resuming paused thread %s with approval: %s", thread_id, payload.approved)
-
+    logger.info("Resuming paused ticket %s with approval: %s", ticket_id, payload.approved)
     # Record the human's decision in state *before* resuming — draft_plan's
-    # outgoing edge (route_from_draft_plan) reads it to decide whether to
-    # actually execute the approved plan or escalate a rejection, instead of
-    # the previous behavior where both outcomes silently dead-ended at END.
+    # outgoing edge (route_from_draft_plan) reads it to decide whether to run
+    # the approved action or escalate a rejection.
     await app.aupdate_state(config, {"human_approved": payload.approved})
-
     try:
-        async for step in app.astream(None, config=config):
-            logger.info("--- Node finished during resumption (ASYNC) ---")
+        async with trace_scope(ticket_trace_id(ticket_id), "ticket", current_user.company_id):
+            async for _ in app.astream(None, config=config):
+                pass
     except Exception as e:
         logger.error("Resumption failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during resumption.")
 
-    final_snapshot = await app.aget_state(config)
-    ticket = db.query(Ticket).filter(
-        Ticket.tenant_id == current_user.company_id, Ticket.external_id == ticket_id
-    ).first()
-    if ticket:
-        await _sync_ticket_from_snapshot(db, ticket, final_snapshot)
+    final = await app.aget_state(config)
+    await asyncio.to_thread(service.apply_graph_outcome, current_user.company_id, ticket_id,
+                            final.values, awaiting_approval(final))
 
     if payload.approved:
         return {"status": "Resumed", "message": "Plan approved and executed."}
     return {"status": "Rejected", "message": "Execution cancelled by human; ticket escalated."}
-
-
-class ChatPayload(BaseModel):
-    message: str = Field(..., min_length=1, max_length=get_settings().chat_message_max_chars)
 
 
 @router.post("/chat")
@@ -397,8 +151,6 @@ class ChatPayload(BaseModel):
 async def chat(
     payload: ChatPayload,
     request: Request,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -408,8 +160,7 @@ async def chat(
     so multi-turn context persists across messages; history lives only in
     the checkpointer (Fase 5.5 decision — no separate SQL transcript table).
     """
-    thread_id = f"chat:{current_user.id}"
-    config = {"configurable": {"thread_id": thread_id, "mcp_client": request.app.state.mcp_client}}
+    config = {"configurable": {"thread_id": f"chat:{current_user.id}", "mcp_client": request.app.state.mcp_client}}
     concierge_app = get_concierge_workflow().compile(checkpointer=request.app.state.checkpointer)
 
     initial_state = {
@@ -422,40 +173,30 @@ async def chat(
         },
         "diagnosis_report": None,
     }
-    async for _ in concierge_app.astream(initial_state, config=config):
-        pass
+    async with trace_scope(f"chat:{uuid.uuid4().hex}", "chat", current_user.company_id):
+        async for _ in concierge_app.astream(initial_state, config=config):
+            pass
 
-    snapshot = await concierge_app.aget_state(config)
-    reply = snapshot.values.get("final_response", "")
-    resolved = snapshot.values.get("resolved", True)
-    diagnosis_report = snapshot.values.get("diagnosis_report")
-
-    if resolved:
+    values = (await concierge_app.aget_state(config)).values
+    reply = values.get("final_response", "")
+    if values.get("resolved", True):
         return {"reply": reply, "status": "resolved"}
 
     # Fase 5.3: the Concierge couldn't resolve it — create a real Ticket and
-    # run it through the full swarm, same as a webhook-originated ticket.
-    company = db.query(Company).filter(Company.id == current_user.company_id).first()
-    plan = company.plan if company else None
-    if plan:
-        tickets_this_month = db.query(Ticket).filter(
-            Ticket.tenant_id == company.id, Ticket.created_at >= _month_start()
-        ).count()
-        if tickets_this_month >= plan.max_tickets_per_month:
-            return {
-                "reply": f"{reply}\n\n(Your organization has reached its monthly ticket limit — please contact an admin.)",
-                "status": "resolved",
-            }
-
-    external_id = f"chat-{uuid.uuid4().hex[:10]}"
+    # run it through the full swarm (via the queue), same as a webhook ticket.
     description = payload.message
-    if diagnosis_report:
+    if values.get("diagnosis_report"):
         # Evidence travels with the ticket, so the engineer (and the GitHub
         # issue built from this description on escalation) starts from the
         # real verdict and failing code location, not just "it's broken".
-        description = f"{payload.message}\n\n--- Diagnóstico automático (Aether) ---\n{diagnosis_report}"
-    ticket = await _create_and_dispatch_ticket(
-        db, company, current_user, external_id, payload.message[:120], description,
-        background_tasks, request.app.state.checkpointer, request.app.state.mcp_client,
+        description = f"{payload.message}\n\n--- Diagnóstico automático (Aether) ---\n{values['diagnosis_report']}"
+    external_id = await asyncio.to_thread(
+        service.open_chat_ticket, current_user.id, f"chat-{uuid.uuid4().hex[:10]}",
+        payload.message[:120], description,
     )
-    return {"reply": reply, "status": "investigating", "ticket_external_id": ticket.external_id}
+    if external_id is None:
+        return {
+            "reply": f"{reply}\n\n(Your organization has reached its monthly ticket limit — please contact an admin.)",
+            "status": "resolved",
+        }
+    return {"reply": reply, "status": "investigating", "ticket_external_id": external_id}

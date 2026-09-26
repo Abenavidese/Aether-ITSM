@@ -1,17 +1,25 @@
 """
-Fakes shared by the Fase 11 security suite. Each test drives the REAL node /
-policy code with a scripted "LLM" (it returns whatever an attacker managed
-to make the model say) and a recording MCP client (so a test can assert a
-tool was NOT called — the point of most of these tests).
+Test doubles shared by the whole suite. Tests drive the REAL node / policy /
+queue code with a scripted "LLM" (it returns whatever the test — or an
+attacker — wants the model to say) and a recording MCP client (so a test can
+assert a tool was NOT called).
 """
+from langchain_core.messages import AIMessage
 
 
 class ScriptedLLM:
-    """Returns the given structured results in order; records every prompt."""
+    """
+    Returns the given structured results in order; records every prompt.
+    Reports token usage on the raw message like a real chat model does
+    (usage_metadata), so tracing/cost code sees realistic data.
+    """
+    model = "scripted-model"
 
-    def __init__(self, *results):
+    def __init__(self, *results, input_tokens: int = 100, output_tokens: int = 20):
         self._results = list(results)
         self.prompts: list[str] = []
+        self._usage = {"input_tokens": input_tokens, "output_tokens": output_tokens,
+                       "total_tokens": input_tokens + output_tokens}
 
     def with_structured_output(self, schema, include_raw=True):
         return self
@@ -19,7 +27,8 @@ class ScriptedLLM:
     async def ainvoke(self, messages):
         self.prompts.append("\n".join(str(m.content) for m in messages))
         result = self._results.pop(0) if len(self._results) > 1 else self._results[0]
-        return {"parsed": result, "parsing_error": None}
+        return {"parsed": result, "parsing_error": None,
+                "raw": AIMessage(content="", usage_metadata=self._usage)}
 
 
 class RecordingMCP:

@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 from langchain_core.messages import HumanMessage
-from sec_fakes import ScriptedLLM
+from fakes import ScriptedLLM
 
 from src.agent.concierge import concierge_node
 from src.agent.state import ConciergeResult
@@ -77,7 +77,7 @@ def _chat_state(text):
 def test_chat_cannot_healthcheck_an_unconfigured_url(monkeypatch, mcp, no_rag, monitored):
     llm = ScriptedLLM(ConciergeResult(response_text="Reviso eso", resolved=True, tool_name="check_service_status",
                                       tool_args={"service_url": "http://169.254.169.254/latest/meta-data/"}))
-    monkeypatch.setattr("src.agent.concierge.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
     out = asyncio.run(concierge_node(_chat_state("revisa http://169.254.169.254/latest/meta-data/"),
                                      {"configurable": {"mcp_client": mcp}}))
     assert mcp.calls == []
@@ -85,13 +85,13 @@ def test_chat_cannot_healthcheck_an_unconfigured_url(monkeypatch, mcp, no_rag, m
 
 
 def test_chat_healthcheck_of_a_configured_service_is_summarized(monkeypatch, no_rag, monitored):
-    from sec_fakes import RecordingMCP
+    from fakes import RecordingMCP
     mcp = RecordingMCP(json.dumps({"status": "success", "service_url": monitored[0]["url"],
                                    "available": False, "http_status": 503, "internal": "x"}))
     llm = ScriptedLLM(ConciergeResult(response_text="Revisé la tienda.", resolved=True,
                                       tool_name="check_service_status",
                                       tool_args={"service_url": monitored[0]["url"] + "/"}))
-    monkeypatch.setattr("src.agent.concierge.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
     out = asyncio.run(concierge_node(_chat_state("la tienda no carga?"), {"configurable": {"mcp_client": mcp}}))
     assert mcp.calls == [("check_service_status", {"service_url": monitored[0]["url"] + "/"})]
     assert "NO disponible (HTTP 503)" in out["final_response"]

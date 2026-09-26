@@ -1,10 +1,12 @@
+import asyncio
 import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, field_validator, model_validator
 from typing import Literal, Optional
-from src.db.database import get_db
+from src.db.database import SessionLocal, get_db
+from src.db.tenant_scope import get_tenant_db
 from src.db.models import User, Company, Ticket
 from src.security.deps import get_current_user
 from src.security.jwt import create_access_token
@@ -229,26 +231,35 @@ def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends
     
     return {"status": "success", "message": "Settings updated"}
 
+def _github_credentials(company_id: str) -> tuple[str, str]:
+    """(repo, token) or an HTTPException — plain DB work, run in a thread."""
+    db = SessionLocal()
+    try:
+        company = db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found.")
+        if not company.github_token or not company.github_repo:
+            raise HTTPException(status_code=400, detail="GitHub credentials not configured.")
+        token = decrypt_token(company.github_token)
+        if not token:
+            raise HTTPException(status_code=400,
+                                detail="Invalid or old token. Please re-enter your GitHub token in Settings.")
+        return company.github_repo, token
+    finally:
+        db.close()
+
+
 @router.get("/test-github")
-async def test_github_connection(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def test_github_connection(current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
 
-    company = db.query(Company).filter(Company.id == current_user.company_id).first()
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found.")
-
-    if not company.github_token or not company.github_repo:
-        raise HTTPException(status_code=400, detail="GitHub credentials not configured.")
-
-    decrypted_token = decrypt_token(company.github_token)
-    if not decrypted_token:
-        raise HTTPException(status_code=400, detail="Invalid or old token. Please re-enter your GitHub token in Settings.")
-
+    # DB lookups run off the event loop (roadmap 2.1); the GitHub call is async.
+    repo, token = await asyncio.to_thread(_github_credentials, current_user.company_id)
     try:
-        repo_data = await get_repo_info(company.github_repo, decrypted_token)
+        repo_data = await get_repo_info(repo, token)
     except RuntimeError as e:
-        logger.warning("GitHub connection test failed for company %s: %s", company.id, e)
+        logger.warning("GitHub connection test failed for company %s: %s", current_user.company_id, e)
         raise HTTPException(status_code=400, detail=f"Failed to connect: {e}")
 
     return {
@@ -259,8 +270,7 @@ async def test_github_connection(db: Session = Depends(get_db), current_user: Us
     }
 
 @router.get("/test-logs")
-async def test_log_connection(service_name: str, db: Session = Depends(get_db),
-                              current_user: User = Depends(get_current_user)):
+async def test_log_connection(service_name: str, current_user: User = Depends(get_current_user)):
     """
     Fase 10.8 "Probar conexión": one read through the SAME read-only client
     the agent uses (GET service state), so a green result proves exactly the
@@ -272,10 +282,11 @@ async def test_log_connection(service_name: str, db: Session = Depends(get_db),
     from src.integrations.logs.readonly_http import PlatformAPIError
     from src.integrations.logs.service import build_provider, get_log_services
 
-    ref = next((s for s in get_log_services(current_user.company_id) if s.name == service_name), None)
+    services = await asyncio.to_thread(get_log_services, current_user.company_id)
+    ref = next((s for s in services if s.name == service_name), None)
     if ref is None:
         raise HTTPException(status_code=404, detail="No log-enabled service with that name.")
-    provider = build_provider(current_user.company_id, ref)
+    provider = await asyncio.to_thread(build_provider, current_user.company_id, ref)
     if provider is None:
         raise HTTPException(status_code=400, detail=f"{ref.provider} credentials not configured.")
 
@@ -295,7 +306,7 @@ async def test_log_connection(service_name: str, db: Session = Depends(get_db),
 
 
 @router.get("/log-audit")
-def get_log_access_audit(limit: int = 50, db: Session = Depends(get_db),
+def get_log_access_audit(limit: int = 50, db: Session = Depends(get_tenant_db),
                          current_user: User = Depends(get_current_user)):
     """Fase 10.9: who made the agent read which service's logs, and when."""
     if current_user.role not in ["superadmin", "admin"]:
@@ -315,7 +326,7 @@ def get_log_access_audit(limit: int = 50, db: Session = Depends(get_db),
 
 
 @router.get("/dashboard")
-def get_dashboard_metrics(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_dashboard_metrics(db: Session = Depends(get_tenant_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
         
@@ -378,7 +389,7 @@ def get_dashboard_metrics(db: Session = Depends(get_db), current_user: User = De
 
 
 @router.get("/tickets/{external_id}")
-def get_ticket_by_external_id(external_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_ticket_by_external_id(external_id: str, db: Session = Depends(get_tenant_db), current_user: User = Depends(get_current_user)):
     """
     Looks up a ticket by the ITSM/SDK-side identifier the webhook received it
     with (Ticket.external_id), not our internal UUID. Ticket processing is

@@ -10,6 +10,7 @@ table — the agent uses the same LogProvider interface as Render.
 
 Still read-only toward Vercel: we never call Vercel's API at all.
 """
+import asyncio
 import hashlib
 import hmac
 import json
@@ -115,6 +116,11 @@ class VercelDrainLogProvider:
 
     async def fetch_logs(self, service: ServiceRef, since: datetime, until: datetime,
                          levels: list[str] | None = None, limit: int = 100) -> list[LogEntry]:
+        # A DB query, not an HTTP call: run it off the event loop (roadmap 2.1).
+        return await asyncio.to_thread(self._query, service, since, until, levels, limit)
+
+    def _query(self, service: ServiceRef, since: datetime, until: datetime,
+               levels: list[str] | None, limit: int) -> list[LogEntry]:
         db = SessionLocal()
         try:
             query = db.query(PlatformLog).filter(

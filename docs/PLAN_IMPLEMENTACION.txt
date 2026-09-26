@@ -867,6 +867,88 @@ automatica" y al aprobar pasa a ingenieria (escalated). Antes quedaba
 a este comportamiento. GET /tenant/tickets/{id} ahora devuelve proposed_plan.
 
 
+FASE 12 - ROBUSTEZ Y ARQUITECTURA (docs/ROADMAP_NEXT_LEVEL.md, seccion 2)
+-----------------------------------------------------------
+12.6 [DONE] Refactor de concierge.py (747 lineas) -> paquete
+        src/agent/concierge/ (node, turn, prompt, repo_view, repo_access,
+        platform, reply). Codigo movido verbatim con un script ast; el nodo
+        partido en pasos con nombre. Ningun modulo > 272 lineas.
+        Tests: solo cambiaron los targets de monkeypatch.
+
+12.1 [DONE] Sin I/O bloqueante en el event loop. Rutas async con SQLAlchemy
+        sync, embeddings + pgvector en el Concierge/nodos, lookups de logs,
+        drain de Vercel, subida al RAG (pypdf + embeddings): todo pasa por
+        asyncio.to_thread o una capa de servicio sync (src/tickets/service.py).
+        El webhook ahora es un `def` (FastAPI lo corre en threadpool).
+        CHECK: tests/test_robustness.py: /health responde en < 0.5 s mientras
+        un chat espera 1.5 s de I/O bloqueante. Verificado que el test FALLA
+        con el codigo bloqueante (2.72 s) — la primera version del test no lo
+        detectaba (medía despues de que el loop se liberara) y se corrigio.
+
+12.2 [DONE] Cola de trabajos durable (tabla jobs, src/jobs/), sin Redis:
+        claim compare-and-set (+ FOR UPDATE SKIP LOCKED en Postgres),
+        reintentos con backoff exponencial, heartbeat + requeue de jobs de
+        workers muertos, dead-letter (run_ticket muerto -> ticket escalado).
+        Outbox: ticket + job en UNA transaccion; el issue de GitHub es un job
+        con reintentos (antes una caida de GitHub lo perdia). Worker embebido
+        (JOBS_EMBEDDED_WORKER, dev) o aparte: python -m src.jobs.worker.
+        run_ticket es idempotente: sin checkpoint -> arranca; interrumpido ->
+        reanuda desde el ultimo nodo completado; pausado/terminado -> solo
+        sincroniza. Limites conocidos (at-least-once): un nodo a medio correr
+        se repite; un crash entre el 201 de GitHub y guardar la URL puede
+        duplicar el issue.
+        CHECK: test real de crash-resume (el supervisor NO se re-ejecuta),
+        issue que sobrevive a un 502 de GitHub, dedupe, dead-letter.
+
+12.4 [DONE] Observabilidad: spans por nodo y por llamada LLM (tokens,
+        modelo, latencia, estado) en tabla agent_spans via contextvar
+        (trace_scope); un insert por corrida; nunca rompe una corrida.
+        GET /tenant/observability/usage (tokens/costo por modelo con
+        LLM_PRICES_JSON, p50/p95 por nodo) y /tenant/tickets/{id}/trace.
+        Logs con request_id (X-Request-ID) y trace_id; LOG_FORMAT=json.
+        Panel "LLM usage" en el dashboard. No OpenTelemetry (decision: una
+        tabla responde lo que el producto necesita; el Span mapea 1:1 a OTel).
+
+12.3 [DONE] Evals (evals/): 42 tickets ES/EN + 10 turnos de Concierge,
+        harness sin efectos secundarios sobre el grafo real, metricas puras
+        testeadas en CI, reportes JSON+MD, --fail-under.
+        Resultados con Ollama real (1B supervisor, 8B resto):
+          corrida 1: risk_band 0.50, route 0.64, tool 0.05, unsafe 0,
+                     concierge 0.90
+          corrida 2: risk_band 0.69, route 0.62, tool 0.70, unsafe 0,
+                     concierge 1.00
+        Hallazgos de la corrida 1 (invisibles para los tests guionados):
+        - El clasificador 1B ponia VPN/software en riesgo 0; con la politica
+          de Fase 11 la tool de riesgo 2 se rechazaba y el ticket escalaba:
+          casi nada se auto-resolvia. FIX: el modelo puede PROPONER cualquier
+          tool; si exige mas riesgo, el riesgo del ticket SUBE (una vez) y
+          vuelve a pasar por Policy (y draft_plan si es 3). Nunca baja.
+          + few-shot en el supervisor.
+        - El Concierge abria un ticket ante "hola" -> regla en el prompt.
+        - Metrica: las consultas informativas no cuentan como tool de accion.
+        PENDIENTE: la mayoria de fallos restantes son de Policy (8B) que,
+        sin documentos de politica en el tenant de eval, rechaza IAM y
+        software. Siguiente paso: opcion --tenant para evaluar con la guia de
+        politicas cargada; y comparar supervisor 1B vs 8B.
+
+12.5 [~] Row-Level Security: rol aether_tenant + politicas por tenant
+        (src/db/rls/enable.sql, rollback disable.sql, idempotentes),
+        scripts/apply_rls.py, sesiones con tenant en Session.info que hacen
+        SET LOCAL ROLE + set_config por transaccion (src/db/tenant_scope.py),
+        aplicado a dashboard, ticket, log-audit, uso/traza y RAG list/delete.
+        CHECK en un Postgres real (Neon 17 temporal, creado y BORRADO en la
+        sesion): 5/5 — un filtro de tenant olvidado solo ve filas propias,
+        insertar/actualizar filas de otro tenant falla, el scope no se filtra
+        al siguiente uso de la conexion del pool. El test encontro un bug en
+        apply_rls.py (el driver leia el %I de format() como placeholder).
+        PENDIENTE (decision del dueno): aplicar a Supabase y activar
+        DB_RLS_ENABLED=true. La busqueda vectorial (PGVector usa su propio
+        engine) sigue protegida solo por el filtro en codigo.
+
+Tests: 221 passed + 5 RLS (skipped sin RLS_TEST_DATABASE_URL). tsc -b sin
+errores nuevos.
+
+
 ESTADO AL CIERRE DE ESTA SESION
 -----------------------------------------------------------
 Fases 0-7 y 8.1 completas y verificadas con ejecucion real (pytest 7/7

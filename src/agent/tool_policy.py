@@ -133,6 +133,23 @@ def allowed_tools(ctx: ToolCallContext) -> list[str]:
     )
 
 
+def proposable_tools() -> list[str]:
+    """
+    Tools the model may PROPOSE in the ticket graph: every tool with a
+    policy. Showing a tool grants nothing — authorize() decides — and hiding
+    riskier tools backfired (evals, roadmap 2.3): a ticket the small
+    classifier under-rated as risk 0 ("my VPN is stuck") could only be
+    answered with text, never with the reset it needed. Now the proposal
+    raises the ticket's risk instead (see nodes.execution_agent_node).
+    """
+    return sorted(TOOL_POLICIES)
+
+
+def required_risk(tool_name: Optional[str]) -> Optional[int]:
+    policy = TOOL_POLICIES.get(tool_name or "")
+    return policy.risk if policy else None
+
+
 def risk_of_tools(names: Iterable[str]) -> int:
     """Highest known risk among tool names (unknown names ignored) — a risk floor source."""
     return max((TOOL_POLICIES[n].risk for n in names if n in TOOL_POLICIES), default=0)

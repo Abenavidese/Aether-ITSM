@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { MetricsBar } from '../components/MetricsBar';
 import { TicketCard } from '../components/TicketCard';
 import { HumanGatePanel } from '../components/HumanGatePanel';
+import { UsagePanel } from '../components/UsagePanel';
 import { config } from '../../../config';
 import type { DashboardTicket } from '../types';
 
@@ -83,6 +84,8 @@ export function AdminDashboardPage() {
         timeSavedHours={dashboardData?.metrics?.time_saved_hours || 0}
         pendingHuman={dashboardData?.metrics?.pending_human || 0}
       />
+
+      <UsagePanel />
 
       <div className="grid grid-cols-12 gap-8">
         

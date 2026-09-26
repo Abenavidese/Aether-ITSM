@@ -6,6 +6,7 @@ diagnosis, writes the audit row, and renders what the LLM is allowed to see.
 Everything here is best-effort: a platform outage, a revoked key or a rate
 limit degrades to "no log data" plus a note — it never breaks a chat turn.
 """
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -135,7 +136,8 @@ async def diagnose_service(tenant_id: str, user_id: str | None, ref: ServiceRef,
             notes.append("el healthcheck no se pudo ejecutar")
             logger.warning("Healthcheck for %s failed: %s", ref.name, e)
 
-    provider = provider or build_provider(tenant_id, ref)
+    # DB reads/writes run off the event loop (roadmap 2.1).
+    provider = provider or await asyncio.to_thread(build_provider, tenant_id, ref)
     state: ServiceState | None = None
     entries: list[LogEntry] = []
     if provider is None:
@@ -162,5 +164,6 @@ async def diagnose_service(tenant_id: str, user_id: str | None, ref: ServiceRef,
         locations=locations_from_logs(entries, tree) if tree else [], notes=notes,
     )
     if provider is not None:
-        _audit(tenant_id, user_id, ref, since, until, len(diagnosis.log_lines), verdict.status)
+        await asyncio.to_thread(_audit, tenant_id, user_id, ref, since, until, len(diagnosis.log_lines),
+                                verdict.status)
     return diagnosis

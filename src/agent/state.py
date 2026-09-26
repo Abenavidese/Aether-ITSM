@@ -85,6 +85,9 @@ class AgentState(TypedDict):
     # Fase 11.1: set when tool_policy refused the proposed action (reason);
     # routes to escalate like any other "a human must handle it" outcome.
     action_refused: Optional[str]
+    # Set when execution raised the risk because the proposed tool needed it
+    # (re-routed through policy once; see nodes.execution_agent_node).
+    risk_rerouted: Optional[bool]
     final_resolution: Optional[str]
     technical_error: bool
     
