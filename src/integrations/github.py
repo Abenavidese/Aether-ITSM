@@ -11,6 +11,8 @@ sees the raw token for the duration of a single request.
 """
 import httpx
 
+from src.security.sensitive_files import SensitiveFileError, is_sensitive_path
+
 GITHUB_API_BASE = "https://api.github.com"
 
 
@@ -115,7 +117,13 @@ async def get_file_content(repo: str, token: str, path: str) -> str:
     `path` comes from matching the user's message against the real tree
     server-side, never from the model. The Contents API serves files up to
     1 MB; callers are expected to budget what they put in a prompt.
+
+    Files that can hold credentials (.env, keys, ...) are refused before any
+    request is made (Fase 11.9) — this is the one choke point every reader
+    goes through.
     """
+    if is_sensitive_path(path):
+        raise SensitiveFileError(f"'{path}' can hold credentials and is never read by the agent.")
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{GITHUB_API_BASE}/repos/{repo}/contents/{path}",

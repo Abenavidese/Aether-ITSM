@@ -22,7 +22,7 @@ import os
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -84,14 +84,24 @@ class MCPToolClient:
     def tools(self) -> dict[str, ToolDescriptor]:
         return self._tools
 
-    def prompt_catalog(self) -> str:
-        """Human-readable tool listing for the agent prompt, derived live — see module docstring."""
-        if not self._tools:
+    def prompt_catalog(self, only: Iterable[str] | None = None,
+                       hidden_params: Mapping[str, Iterable[str]] | None = None) -> str:
+        """
+        Human-readable tool listing for the agent prompt, derived live — see
+        module docstring. `only` narrows it to the tools the caller is
+        allowed to use (tool_policy.allowed_tools): a risk-1 ticket's prompt
+        shouldn't even mention modify_iam_access. `hidden_params` drops
+        parameters the model must not choose (tool_policy.identity_params).
+        """
+        wanted = set(only) if only is not None else None
+        hidden = {name: set(params) for name, params in (hidden_params or {}).items()}
+        tools = [t for t in self._tools.values() if wanted is None or t.name in wanted]
+        if not tools:
             return "No tools available."
         lines = []
-        for t in self._tools.values():
+        for t in tools:
             props = (t.input_schema or {}).get("properties", {})
-            args = ", ".join(props.keys())
+            args = ", ".join(p for p in props if p not in hidden.get(t.name, set()))
             lines.append(f"- {t.name}({args}): {t.description}")
         return "\n".join(lines)
 

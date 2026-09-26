@@ -44,6 +44,7 @@ def _ensure_schema_migrations():
             "ALTER TABLE companies ADD COLUMN monitored_services VARCHAR",
             "ALTER TABLE companies ADD COLUMN render_api_key VARCHAR",
             "ALTER TABLE companies ADD COLUMN vercel_drain_secret VARCHAR",
+            "ALTER TABLE tickets ADD COLUMN proposed_plan VARCHAR",
         ):
             try:
                 conn.execute(text(statement))

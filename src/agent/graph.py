@@ -24,7 +24,7 @@ def route_from_execution(state: AgentState) -> str:
     this check that signal was written to state but never read, so the
     graph fell straight through to END and no human was ever notified.
     """
-    if state.get("technical_error"):
+    if state.get("technical_error") or state.get("action_refused"):
         return "escalate"
 
     return "end"

@@ -1,9 +1,10 @@
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends, Header
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.messages import HumanMessage
 from src.agent.concierge import get_concierge_workflow
 from src.agent.graph import get_workflow
@@ -12,8 +13,10 @@ from src.db.models import Company, User, Ticket
 from src.security.deps import get_current_user
 from src.security.api_keys import hash_api_key
 from src.security.encryption import encrypt_token, decrypt_token
-from src.security.limiter import limiter
+from src.security.limiter import limiter, user_or_ip_key
+from src.config import get_settings
 from src.integrations.github import create_issue
+from src.integrations.issue_format import build_escalation_issue
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -26,12 +29,29 @@ AUTONOMOUS_RESOLUTION_MINUTES_SAVED = 15
 AUTONOMOUS_RESOLUTION_COST_SAVED_USD = 12.50
 
 
+# Input limits (Fase 11.6): every field below ends up in an LLM prompt, a DB
+# row and possibly a GitHub issue — unbounded input is unbounded cost and a
+# way to push the system prompt out of the context window.
+_IMAGE_DATA_URI = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$")
+MAX_IMAGE_DATA_URI_CHARS = 7_000_000  # ~5 MB image
+
+
 class TicketPayload(BaseModel):
-    ticket_id: str
-    summary: str
-    description: str
-    user_email: str
-    image_base64: str | None = None
+    ticket_id: str = Field(..., min_length=1, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$")
+    summary: str = Field(..., min_length=1, max_length=300)
+    description: str = Field(..., max_length=10_000)
+    user_email: str = Field(..., max_length=150)
+    image_base64: str | None = Field(default=None, max_length=MAX_IMAGE_DATA_URI_CHARS)
+
+    @field_validator("image_base64")
+    @classmethod
+    def _inline_image_only(cls, v):
+        # Only an inline image. A plain URL here would be fetched by whatever
+        # model provider receives it — i.e. an attacker-chosen URL requested
+        # on our behalf.
+        if v is not None and not _IMAGE_DATA_URI.fullmatch(v):
+            raise ValueError("image_base64 must be a data:image/(png|jpeg|webp);base64 URI")
+        return v
 
 class ApprovalPayload(BaseModel):
     approved: bool
@@ -47,6 +67,7 @@ def _is_escalated(values: dict) -> bool:
     """True for every state shape that routes to escalate_node (see graph.py)."""
     return (
         bool(values.get("technical_error"))
+        or bool(values.get("action_refused"))
         or values.get("compliance_passed") is False
         or values.get("human_approved") is False
         or values.get("assessed_risk") == 4
@@ -75,13 +96,11 @@ async def _create_escalation_issue(db: Session, ticket: Ticket, values: dict) ->
         logger.warning("Could not decrypt github_token for company %s; skipping issue creation", ticket.tenant_id)
         return None
 
-    reason = values.get("final_resolution") or "Escalated by Aether ITSM"
-    title = f"[Aether] {ticket.title}"
-    body = (
-        f"**Ticket:** {ticket.external_id}\n\n"
-        f"**Description:**\n{ticket.description}\n\n"
-        f"**Escalation reason:** {reason}\n"
-        f"**Compliance notes:** {values.get('compliance_notes') or 'N/A'}\n"
+    # Untrusted user text + LLM output, going to a possibly public repo:
+    # redacted and rendered inert (see issue_format.py).
+    title, body = build_escalation_issue(
+        ticket.external_id, ticket.title, ticket.description,
+        values.get("final_resolution"), values.get("compliance_notes"),
     )
 
     try:
@@ -100,6 +119,9 @@ async def _sync_ticket_from_snapshot(db: Session, ticket: Ticket, snapshot) -> N
         # Still paused (e.g. draft_plan waiting on human approval).
         ticket.status = "pending_human"
         ticket.resolution_path = None
+        # What the admin approves must be visible to them (Fase 11.2): the
+        # plan text ends with the exact action that will run.
+        ticket.proposed_plan = snapshot.values.get("proposed_plan")
         db.commit()
         return
 
@@ -367,10 +389,11 @@ async def approve_ticket(
 
 
 class ChatPayload(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=get_settings().chat_message_max_chars)
 
 
 @router.post("/chat")
+@limiter.limit(get_settings().chat_rate_limit, key_func=user_or_ip_key)
 async def chat(
     payload: ChatPayload,
     request: Request,

@@ -51,7 +51,7 @@ class ConciergeResult(BaseModel):
     resolved: bool = Field(
         description="True if response_text fully answers the request and no Ticket is needed."
     )
-    # Restricted at runtime to a safe allow-list (see CONCIERGE_ALLOWED_TOOLS
+    # Restricted at runtime by tool_policy (see CONCIERGE_RISK_CEILING
     # in concierge.py) — the Concierge must never dispatch a risky MCP tool
     # directly; anything beyond a quick lookup/healthcheck goes through a
     # real Ticket and the full Supervisor -> Policy -> Execution swarm.
@@ -77,7 +77,14 @@ class AgentState(TypedDict):
     assessed_risk: int
     intent: str
     proposed_plan: Optional[str]
+    # Fase 11.2: the exact {tool_name, tool_args} a human approves — already
+    # validated by tool_policy. Execution after approval runs THIS, never a
+    # fresh LLM proposal.
+    planned_action: Optional[dict]
     human_approved: bool
+    # Fase 11.1: set when tool_policy refused the proposed action (reason);
+    # routes to escalate like any other "a human must handle it" outcome.
+    action_refused: Optional[str]
     final_resolution: Optional[str]
     technical_error: bool
     

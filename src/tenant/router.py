@@ -12,6 +12,7 @@ from src.security.encryption import encrypt_token, decrypt_token
 from src.security.cookies import set_auth_cookie
 from src.integrations.github import get_repo_info
 import re
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,30 @@ class MonitoredService(BaseModel):
     provider: Optional[Literal["render", "vercel"]] = None
     service_id: Optional[str] = None
     owner_id: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def _bounded_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v or len(v) > 80:
+            raise ValueError("service name must be 1-80 characters")
+        return v
+
+    @field_validator("url")
+    @classmethod
+    def _http_url_without_credentials(cls, v: str) -> str:
+        # The healthcheck URL is requested by OUR server (Fase 11.4). Shape
+        # is checked here; the address itself (public only, no redirects)
+        # is checked at request time by src/security/url_guard.py, since DNS
+        # can change after the config is saved.
+        parts = urlsplit(v.strip())
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError("service url must be an http(s) URL")
+        if parts.username or parts.password:
+            raise ValueError("service url must not contain credentials")
+        if len(v) > 500:
+            raise ValueError("service url is too long")
+        return v.strip()
 
     @model_validator(mode="after")
     def _validate_log_source(self):
@@ -258,7 +283,7 @@ async def test_log_connection(service_name: str, db: Session = Depends(get_db),
         state = await provider.get_service_state(ref)
     except PlatformAPIError as e:
         logger.warning("Log connection test failed for company %s: %s", current_user.company_id, e)
-        detail = "Invalid API key or no access to that service." if e.status_code in (401, 403, 404) else str(e)
+        detail = "Invalid API key or no access to that service." if e.status_code in (401, 403, 404) else f"platform API error ({e.status_code})"
         raise HTTPException(status_code=400, detail=f"Failed to connect: {detail}")
 
     return {
@@ -335,7 +360,8 @@ def get_dashboard_metrics(db: Session = Depends(get_db), current_user: User = De
             "category": t.category,
             "created_at": t.created_at.isoformat() if t.created_at else None,
             "resolution_path": t.resolution_path,
-            "github_issue_url": t.github_issue_url
+            "github_issue_url": t.github_issue_url,
+            "proposed_plan": t.proposed_plan,
         })
         
     return {
@@ -371,6 +397,9 @@ def get_ticket_by_external_id(external_id: str, db: Session = Depends(get_db), c
         "title": ticket.title,
         "status": ticket.status,
         "resolution_path": ticket.resolution_path,
+        # Survives after the ticket leaves pending_human: shows what the
+        # approval actually covered (Fase 11.2).
+        "proposed_plan": ticket.proposed_plan,
         "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
         "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
         "estimated_time_saved_minutes": ticket.estimated_time_saved_minutes,

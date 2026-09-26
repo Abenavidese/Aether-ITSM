@@ -44,6 +44,14 @@ export function HumanGatePanel({ tickets, onApprove }: HumanGatePanelProps) {
               {t.description}
             </div>
 
+            {/* What the admin approves is exactly this plan + action (Fase 11.2):
+                approving without seeing it was approving blind. Rendered as
+                plain text — it contains LLM output. */}
+            <div className="bg-slate-900 rounded p-3 mb-4 text-xs font-mono text-slate-300 whitespace-pre-wrap border border-amber-500/20">
+              <span className="text-amber-400">Proposed plan:</span><br />
+              {t.proposed_plan || 'No plan recorded for this ticket.'}
+            </div>
+
             <div className="mb-4">
               <input
                 type="text"

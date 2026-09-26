@@ -4,6 +4,7 @@ import httpx
 # mcp>=2.0 renamed FastMCP -> MCPServer (same decorator-based API otherwise).
 from mcp.server.mcpserver import MCPServer
 from src.config import get_settings
+from src.security.url_guard import UnsafeURLError, validate_outbound_url
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ def reset_vpn_session(user_id: str) -> str:
     Terminates active VPN sessions for a specific user to fix hung connections.
     Risk Level: 2
     """
-    logger.info("Executing reset_vpn_session for %s", user_id)
+    logger.info("Executing reset_vpn_session")
     result = {
         "status": "success",
         "action": "vpn_session_terminated",
@@ -35,7 +36,7 @@ def provision_standard_software(user_id: str, software_id: str) -> str:
     Adds a user to an AD group that triggers an automated MDM software install.
     Risk Level: 2
     """
-    logger.info("Provisioning %s for %s", software_id, user_id)
+    logger.info("Provisioning %s", software_id)
     settings = get_settings()
     whitelist = settings.get_mdm_whitelist_list
     
@@ -59,7 +60,7 @@ def modify_iam_access(user_id: str, resource_arn: str, access_level: str) -> str
     Modifies cloud or directory access policies.
     Risk Level: 3 (Requires Approval before invocation)
     """
-    logger.info("Modifying IAM Access: %s -> %s (%s)", user_id, resource_arn, access_level)
+    logger.info("Modifying IAM access on %s (%s)", resource_arn, access_level)
     return json.dumps({
         "status": "success",
         "action": "iam_policy_attached",
@@ -77,9 +78,19 @@ def check_service_status(service_url: str) -> str:
     from a user-side problem.
     Risk Level: 0
     """
+    # SSRF, layer 2 (layer 1 = tool_policy: only the tenant's configured
+    # URLs). Public addresses only, and redirects are NOT followed: a 3xx
+    # already proves the service answers, and following it would let a
+    # public host bounce this request to an internal one.
+    try:
+        validate_outbound_url(service_url, allow_private=get_settings().allow_private_healthcheck_targets)
+    except UnsafeURLError as e:
+        logger.warning("Refused healthcheck to an unsafe URL: %s", e)
+        return json.dumps({"status": "error", "service_url": service_url, "message": f"URL refused: {e}"})
+
     logger.info("Checking service status for %s", service_url)
     try:
-        response = httpx.get(service_url, timeout=5.0, follow_redirects=True)
+        response = httpx.get(service_url, timeout=5.0, follow_redirects=False)
         available = response.status_code < 500
         return json.dumps({
             "status": "success",
@@ -94,7 +105,7 @@ def check_service_status(service_url: str) -> str:
             "status": "success",
             "service_url": service_url,
             "available": False,
-            "error": str(e),
+            "error": type(e).__name__,
         })
 
 @mcp.tool()
@@ -103,7 +114,7 @@ def query_knowledge_base(query_string: str) -> str:
     Performs a semantic search over internal Tier 1 support documentation.
     Risk Level: 0
     """
-    logger.info("Querying KB for: %s", query_string)
+    logger.info("Querying KB (%d chars)", len(query_string))
     # In a real app, this would query a Vector DB.
     # For now, returning standard simulated responses.
     return json.dumps({

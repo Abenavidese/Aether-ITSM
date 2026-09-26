@@ -229,10 +229,18 @@ def main():
     check("Aprobación procesada sin error", r.status_code == 200, r.text)
 
     ticket = wait_for_ticket(client, ticket_high, want_status=("resolved", "escalated"), timeout=60)
-    check("Ticket de riesgo alto quedó resuelto tras la aprobación (antes de este fix, quedaba colgado)",
-          ticket["status"] == "resolved", str(ticket))
-    check("Quedó marcado como resuelto por un humano, no de forma autónoma",
-          ticket.get("resolution_path") == "human", str(ticket))
+    # Fase 11.2: approval runs EXACTLY the action frozen in the plan. If the
+    # plan had no valid automated action (e.g. this ticket names no concrete
+    # ARN), approving hands it to an engineer -> "escalated". Only a plan
+    # with an executable action ends "resolved" (by a human).
+    plan = ticket.get("proposed_plan") or ""
+    if "Exact action that will run on approval" in plan:
+        check("Plan con acción concreta: resuelto tras la aprobación",
+              ticket["status"] == "resolved" and ticket.get("resolution_path") == "human", str(ticket))
+    else:
+        check("Plan sin acción automática válida: pasa a ingeniería tras la aprobación (no se inventa una ejecución)",
+              ticket["status"] == "escalated" and "No automated action" in plan, str(ticket))
+        print(f"    (plan: {plan[-160:]!r})")
 
     print("\n=== Fase 5: idempotencia del webhook ===")
     r = client.post("/webhook/ticket", headers=webhook_headers, json={

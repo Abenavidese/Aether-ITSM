@@ -6,6 +6,7 @@ export function KnowledgeBasePanel() {
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [sourceType, setSourceType] = useState('company_policy');
 
@@ -39,6 +40,7 @@ export function KnowledgeBasePanel() {
 
     setIsUploading(true);
     setError('');
+    setWarning('');
 
     const formData = new FormData();
     formData.append('file', file);
@@ -54,6 +56,13 @@ export function KnowledgeBasePanel() {
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.detail || 'Failed to upload document');
+      }
+
+      // Fase 11.5: the backend flags passages phrased as instructions to an
+      // AI. The document is stored anyway (the admin knows if it's legit).
+      const result = await res.json();
+      if (result.injection_flags?.length) {
+        setWarning(`"${file.name}" contains passages that read like instructions to an AI (${result.injection_flags.join(', ')}). The assistant will treat them as plain document text — review the file if you didn't expect this.`);
       }
 
       await fetchFiles();
@@ -110,7 +119,7 @@ export function KnowledgeBasePanel() {
             <Upload size={16} /> {isUploading ? 'Uploading...' : 'Upload File'}
             <input 
               type="file" 
-              accept=".pdf,.txt" 
+              accept=".pdf,.txt,.md" 
               className="hidden" 
               onChange={handleFileUpload} 
               disabled={isUploading}
@@ -118,6 +127,13 @@ export function KnowledgeBasePanel() {
           </label>
         </div>
       </div>
+
+      {warning && (
+        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3 text-amber-400 text-sm">
+          <ShieldAlert size={18} />
+          {warning}
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-3 text-rose-400 text-sm">

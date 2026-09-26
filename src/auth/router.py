@@ -16,8 +16,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def register(request: Request, user: schemas.UserCreate, db: Session = Depends(get_db)):
     try:
         return service.create_tenant_and_user(db, user)
-    except EmailAlreadyRegistered as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except EmailAlreadyRegistered:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is already registered.")
 
 @router.post("/login")
 @limiter.limit("5/minute")

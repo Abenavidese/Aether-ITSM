@@ -30,19 +30,32 @@ class RiskFloorRule(NamedTuple):
 
 # Keep in sync with docs/PLAN_IMPLEMENTACION.txt / scripts/fixtures/guia_politicas_empresa.txt.
 # Highest matching floor wins; order in this list doesn't matter.
+# Spanish variants matter as much as English ones: users write in both, and
+# the first version of these rules (English only) let "dame permisos de
+# administrador en AWS" through untouched (Fase 11 audit, hallazgo A).
+# The tool policy (tool_policy.py) is the second, independent line: even
+# when no rule matches, a risk-3 tool can't run without human approval.
 RISK_FLOOR_RULES: list[RiskFloorRule] = [
     RiskFloorRule(
-        re.compile(r"\b(iam|aws\s*admin|root\s*access|admin(istrator)?\s*access)\b", re.IGNORECASE),
+        re.compile(
+            r"\b(iam|aws\s*admin|root\s*access|admin(istrator)?\s*(access|rights|permissions?|privileges?)"
+            r"|sudo(ers)?|(acceso|permisos?|privilegios?|derechos?|rol)\s+(de\s+)?(admin(istrador)?|root|superusuario)"
+            r"|(hazme|hacerme|volverme|ser)\s+admin(istrador)?)\b",
+            re.IGNORECASE,
+        ),
         3,
         "IAM/administrative access changes always require human approval (company policy).",
     ),
     RiskFloorRule(
-        re.compile(r"\b(production\s*database|prod\s*db|base\s*de\s*datos\s*de\s*producci[oó]n)\b", re.IGNORECASE),
+        re.compile(
+            r"\b(production\s*database|prod(uction)?\s*db|base\s*de\s*datos\s*(de\s*)?(producci[oó]n|prod))\b",
+            re.IGNORECASE,
+        ),
         4,
         "Production database incidents are always critical and must escalate to SRE.",
     ),
     RiskFloorRule(
-        re.compile(r"\bfirewall\b", re.IGNORECASE),
+        re.compile(r"\b(firewall|cortafuegos|security\s*group|grupo\s*de\s*seguridad)\b", re.IGNORECASE),
         4,
         "Firewall modifications are always treated as critical.",
     ),

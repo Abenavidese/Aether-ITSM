@@ -60,6 +60,22 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 1024
     llm_timeout_seconds: float = 120.0
     ollama_num_ctx: int = 8192
+    # Context window assumed for hosted (Nebius/OpenAI) models when budgeting
+    # prompt history (src/agent/context_budget.py).
+    hosted_context_window_tokens: int = 32768
+
+    # ── LLM input limits (Fase 11.6) ──
+    chat_message_max_chars: int = 4000
+    chat_rate_limit: str = "20/minute"
+    knowledge_upload_max_bytes: int = 10 * 1024 * 1024
+    knowledge_upload_max_pdf_pages: int = 300
+    knowledge_rate_limit: str = "10/minute"
+
+    # ── Outbound requests (Fase 11.4) ──
+    # Healthchecks may only target publicly routable hosts. Set True only for
+    # a self-hosted deployment that must monitor intranet services; cloud
+    # metadata / link-local addresses stay blocked either way.
+    allow_private_healthcheck_targets: bool = False
 
     # ── Platform logs (Fase 10) ──
     # Vercel drain lines are kept only this long (purged on each ingest).
@@ -105,6 +121,10 @@ class Settings(BaseSettings):
     def get_cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
         
+    @property
+    def llm_context_window_tokens(self) -> int:
+        return self.ollama_num_ctx if self.use_ollama else self.hosted_context_window_tokens
+
     @property
     def get_mdm_whitelist_list(self) -> list[str]:
         return [pkg.strip() for pkg in self.mdm_software_whitelist.split(",") if pkg.strip()]

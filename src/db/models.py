@@ -103,6 +103,8 @@ class Ticket(Base):
     
     # External Links
     github_issue_url = Column(String, nullable=True)
+    # Risk-3 plan awaiting approval, incl. the exact action (Fase 11.2).
+    proposed_plan = Column(String, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     resolved_at = Column(DateTime(timezone=True), nullable=True)
@@ -151,3 +153,26 @@ class PlatformLog(Base):
     status_code = Column(Integer, nullable=True)
     request_path = Column(String, nullable=True)
     timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class KnowledgeAudit(Base):
+    """
+    One row per change to a tenant's knowledge base (Fase 11.5): upload,
+    delete, or admin feedback. Whatever lands in the RAG is later read by the
+    agents as context, so "who put this text there, and when" must be
+    answerable. Never stores the content itself — only its hash and the
+    injection heuristics it tripped.
+    """
+    __tablename__ = "knowledge_audit"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    action = Column(String, nullable=False)          # upload | delete | feedback
+    filename = Column(String, nullable=False)
+    source_type = Column(String, nullable=True)
+    sha256 = Column(String, nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    chunks = Column(Integer, nullable=True)
+    injection_flags = Column(String, nullable=True)  # comma-separated heuristic names
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
