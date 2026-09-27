@@ -92,4 +92,5 @@ def ticket_trace(tenant_id: str, trace_id: str) -> list[dict]:
             "kind": s.kind, "name": s.name, "model": s.model, "status": s.status, "duration_ms": s.duration_ms,
             "input_tokens": s.input_tokens, "output_tokens": s.output_tokens,
             "started_at": s.started_at.isoformat() if s.started_at else None,
+            "attributes": json.loads(s.attributes) if s.attributes else None,
         } for s in spans]

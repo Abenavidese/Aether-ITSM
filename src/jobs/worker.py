@@ -152,7 +152,7 @@ async def _main() -> None:
     from src.agent.checkpointer import open_checkpointer
     from src.agent.mcp_client import MCPToolClient
     from src.config import get_settings
-    from src.tickets.jobs import build_worker
+    from src.jobs.registry import build_worker
 
     settings = get_settings()
     stop = asyncio.Event()

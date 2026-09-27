@@ -122,8 +122,6 @@ DEAD_HANDLERS = {JobKind.RUN_TICKET.value: run_ticket_dead}
 
 
 def build_worker(deps: WorkerDeps, settings: Settings) -> JobWorker:
-    return JobWorker(
-        deps, HANDLERS, dead_handlers=DEAD_HANDLERS,
-        concurrency=settings.jobs_concurrency, poll_interval=settings.jobs_poll_seconds,
-        visibility_timeout=settings.jobs_visibility_timeout_seconds,
-    )
+    """Kept for callers of the old location: the worker drains every job kind (src/jobs/registry.py)."""
+    from src.jobs.registry import build_worker as build_full_worker
+    return build_full_worker(deps, settings)

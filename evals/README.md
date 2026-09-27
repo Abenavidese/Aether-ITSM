@@ -45,3 +45,30 @@ decide con "prácticas seguras estándar", así que pedidos de IAM legítimos
 tienden a escalar en vez de llegar a aprobación. Para medir con políticas
 reales, usar un tenant con la guía de políticas cargada (pendiente: opción
 `--tenant`).
+
+## Eval del RAG (Fase 14)
+
+Mide si la búsqueda trae el pasaje correcto, no lo que el modelo responde con él.
+
+| Archivo | Qué es |
+| :-- | :-- |
+| `rag/corpus/main/` | 14 documentos de un tenant ficticio (políticas, runbooks, FAQ, glosario en texto plano y un PDF con tabla, una sección que cruza de página y una página escaneada), en español e inglés, con secciones parecidas a propósito. |
+| `rag/corpus/other/` | Un segundo tenant con temas solapados (su propia política de VPN, otro significado para `PAY-4012`): cualquier pasaje suyo en un resultado es una fuga. |
+| `rag/dataset.jsonl` | 74 consultas con su documento y sección esperados: paráfrasis, códigos exactos, palabras clave, seguimientos con historial, otro idioma, tabla del PDF y 10 sin respuesta en el corpus. |
+| `rag/run.py` | Indexa el corpus con el pipeline real (`src/rag`) en un Postgres **desechable** y corre las consultas. `--system legacy` reproduce el RAG anterior (línea base). `--option` apaga piezas para ablaciones (`keyword=off`, `rewrite=off`, `reranker=<modelo>`...). |
+| `rag/calibrate.py` | Elige el umbral de relevancia desde un reporte (equilibrio entre encontrar la respuesta y dejar vacío lo que no la tiene). |
+| `rag/metrics.py` | Métricas puras, testeadas en CI (`tests/test_rag_eval.py`, que además verifica que cada sección esperada exista en el corpus). |
+
+```bash
+docker run -d --name aether-rag-pg -e POSTGRES_PASSWORD=aether -e POSTGRES_DB=aether -p 55432:5432 pgvector/pgvector:pg17
+.venv/Scripts/python.exe -m evals.rag.run --database-url postgresql://postgres:aether@localhost:55432/aether
+.venv/Scripts/python.exe -m evals.rag.run --database-url ... --no-index \
+    --option reranker=jinaai/jina-reranker-v2-base-multilingual --fail-under hit@5=0.95 --fail-under tenant_leaks_max=0
+```
+
+Métricas: **hit@k** (el pasaje esperado está entre los k primeros que llegan al
+modelo), **MRR** y **nDCG@5** (qué tan arriba), **candidate_hit@10** (ranking
+antes del filtro de relevancia), **no_answer_accuracy** (preguntas sin respuesta
+que quedan vacías), **false_empty_rate**, **tenant_leaks** (tiene que ser 0) y
+latencia p50/p95. Los resultados de cada paso de la Fase 14 están en
+`docs/PLAN_IMPLEMENTACION.txt`.

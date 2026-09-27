@@ -93,9 +93,10 @@ cd frontend && npm install && npm run dev            # http://localhost:5173
 | Command | What it checks |
 | :-- | :-- |
 | `pytest -q` | ~250 tests: graph, queue, security findings, tool policy, migrations, vision — scripted models, no network |
-| `ruff check .` · `mypy` | lint; types for `src/agent` and `src/security` |
+| `ruff check .` · `mypy` | lint; types for `src/agent`, `src/security` and the retrieval modules of `src/rag` |
 | `RLS_TEST_DATABASE_URL=… pytest tests/test_rls_postgres.py` | Row-Level Security on a real Postgres |
 | `python -m evals.run --suite all --fail-under unsafe_actions_max=0` | 42 tickets + 10 chat turns on the real models; unsafe actions must be 0 |
+| `python -m evals.rag.run --database-url <disposable pg>` | RAG retrieval eval: 74 queries over a 16-document, 2-tenant corpus (hit@k, MRR, nDCG, "no answer", tenant leaks) |
 | `python scripts/redteam_ollama.py` | prompt-injection / privilege attacks against the real local models |
 
 CI (`.github/workflows/ci.yml`) runs lint, types, tests, migrations + `alembic check` and the
@@ -107,6 +108,7 @@ RLS suite on Postgres, the frontend lint/type-check/build, and both Docker build
 | :-- | :-- |
 | Agent graph, risk floors, tool policy, human gate, escalation to GitHub | Implemented |
 | Employee chat: RAG, repo reading, read-only platform logs, screenshot reading | Implemented |
+| RAG: hybrid search (pgvector HNSW + BM25 + exact identifiers), cross-encoder reranking, follow-up rewriting, cited sources, versioned async indexing, RLS on retrieval | Implemented — measured with `evals/rag` (hit@5 0.78 → 0.98) |
 | Job queue, tracing/usage, evals, migrations, Docker, CI | Implemented |
 | Row-Level Security | Implemented and tested; enabled per deployment (`DB_RLS_ENABLED`) |
 | MCP tools `reset_vpn_session`, `provision_standard_software`, `modify_iam_access`, `query_knowledge_base` | Real protocol, **simulated backends** |
@@ -121,7 +123,7 @@ src/agent/          graph, nodes, risk + tool policy, vision, Concierge chat age
 src/api/            webhook, approval and chat endpoints
 src/jobs/ src/tickets/   durable queue and ticket lifecycle
 src/security/       redaction, prompt fences, URL guard, image validation, auth deps
-src/rag/            ingestion guard, chunking, pgvector retrieval
+src/rag/            parsing, chunking, versioned indexing (queue), hybrid retrieval, reranking, citations
 src/integrations/   GitHub, read-only Render/Vercel logs
 src/observability/  spans, usage, request/trace ids
 src/db/             models, migrations runner, Row-Level Security

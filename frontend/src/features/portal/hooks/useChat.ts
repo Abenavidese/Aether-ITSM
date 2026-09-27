@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import type { Message } from '../components/ChatBubble';
+import type { Message, Source } from '../components/ChatBubble';
 import { config } from '../../../config';
 import { apiErrorMessage } from '../../../utils/apiError';
 
@@ -22,8 +22,8 @@ export function useChat() {
     scrollToBottom();
   }, [messages]);
 
-  const appendAgentMessage = (text: string) => {
-    setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, sender: 'agent', text }]);
+  const appendAgentMessage = (text: string, sources?: Source[]) => {
+    setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, sender: 'agent', text, sources }]);
   };
 
   const pollTicketUntilSettled = async (externalId: string) => {
@@ -88,7 +88,7 @@ export function useChat() {
         return;
       }
 
-      appendAgentMessage(data.reply);
+      appendAgentMessage(data.reply, data.sources);
 
       if (data.status === 'investigating' && data.ticket_external_id) {
         pollTicketUntilSettled(data.ticket_external_id);

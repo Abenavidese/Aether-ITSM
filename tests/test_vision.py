@@ -8,7 +8,7 @@ import uuid
 
 import httpx
 import pytest
-from fakes import RecordingMCP, ScriptedLLM
+from fakes import RecordingMCP, ScriptedLLM, empty_retrieval
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import ValidationError
@@ -166,7 +166,7 @@ def test_chat_image_reaches_the_concierge_prompt(employee, vision_llm, monkeypat
     chat_llm = ScriptedLLM(ConciergeResult(response_text="Veo un error 500 en authController.js:42", resolved=True))
     monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, chat_llm))
     monkeypatch.setattr("src.agent.concierge.node.get_monitored_services", lambda t: [])
-    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
     monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", _no_tree)
     app.state.checkpointer = MemorySaver()
     app.state.mcp_client = RecordingMCP()

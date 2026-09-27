@@ -26,6 +26,8 @@ def pg():
     # pool_size=1: every session reuses ONE connection, so a leaked SET ROLE /
     # tenant setting would show up in the next session.
     engine = create_engine(DB_URL, pool_size=1, max_overflow=0)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     models.Base.metadata.drop_all(engine)
     models.Base.metadata.create_all(engine)
     with engine.begin() as conn:
@@ -57,6 +59,17 @@ def two_tenants(pg):
                                  description="d"))
         db.execute(text("INSERT INTO langchain_pg_embedding VALUES (:i1, CAST(:m1 AS jsonb)), (:i2, CAST(:m2 AS jsonb))"),
                    {"i1": "c1", "m1": f'{{"tenant_id": "{a}"}}', "i2": "c2", "m2": f'{{"tenant_id": "{b}"}}'})
+        for tenant in (a, b):  # Fase 14: the same VPN passage in both tenants' knowledge bases
+            doc = models.KnowledgeDocument(tenant_id=tenant, filename="vpn.md", source_type="company_policy",
+                                           status="ready", latest_version=1, active_version=1, chunk_count=1)
+            db.add(doc)
+            db.flush()
+            db.add(models.KnowledgeChunk(
+                tenant_id=tenant, document_id=doc.id, version=1, is_active=True, source_type="company_policy",
+                filename="vpn.md", section="Error ERR_VPN_809", chunk_index=0,
+                content=f"Documento: vpn.md\n\nERR_VPN_809 en {tenant}: puerto UDP 4500 bloqueado",
+                search_text=f"err vpn 809 en {tenant} puerto udp 4500 bloqueado",
+                embedding=[1.0, 0.0, 0.0], embedding_model="test:3d"))
         db.commit()
     return a, b
 
@@ -108,3 +121,40 @@ def test_disabled_flag_keeps_the_app_role(pg, two_tenants):
     a, b = two_tenants
     with tenant_session(a, session_factory=factory, rls=False) as db:
         assert {t.tenant_id for t in db.query(models.Ticket).all()} >= {a, b}
+
+
+# ── Fase 14: the knowledge store searches inside RLS ─────────────────────────
+
+def _store(factory):
+    from src.rag.store import KnowledgeStore
+    return KnowledgeStore(lambda tenant: tenant_session(tenant, session_factory=factory, rls=True))
+
+
+def test_knowledge_search_only_sees_own_chunks(pg, two_tenants):
+    _, factory = pg
+    a, b = two_tenants
+    store = _store(factory)
+    sources = ["company_policy"]
+    dense = store.dense_search(a, [1.0, 0.0, 0.0], "test:3d", sources, 10)
+    keyword = store.keyword_search(a, ["vpn", "809", "puerto"], sources, 10)
+    entity = store.entity_search(a, ["err_vpn_809"], sources, 10)
+    for found in ([c for c, _ in dense], [c for c, _ in keyword], entity):
+        assert found and all(a in c.content and b not in c.content for c in found)
+    with tenant_session(a, session_factory=factory, rls=True) as db:   # no WHERE tenant_id at all
+        assert set(db.execute(text("SELECT tenant_id FROM knowledge_chunks")).scalars()) == {a}
+        assert set(db.execute(text("SELECT tenant_id FROM knowledge_documents")).scalars()) == {a}
+
+
+def test_dense_search_uses_the_models_hnsw_index(pg, two_tenants):
+    from src.rag.store import ensure_vector_index, vector_index_name
+    engine, factory = pg
+    a, _ = two_tenants
+    ensure_vector_index(engine, "test:3d", 3)
+    ensure_vector_index(engine, "test:3d", 3)   # idempotent
+    with factory() as db:
+        db.execute(text("SET LOCAL enable_seqscan = off"))   # 2 rows: force the planner to show the index is usable
+        plan = "\n".join(db.execute(text(
+            "EXPLAIN SELECT id FROM knowledge_chunks WHERE tenant_id = :t AND is_active "
+            "AND embedding_model = 'test:3d' AND source_type IN ('company_policy') "
+            "ORDER BY embedding::vector(3) <=> CAST('[1,0,0]' AS vector(3)) LIMIT 5"), {"t": a}).scalars())
+    assert vector_index_name("test:3d") in plan, plan

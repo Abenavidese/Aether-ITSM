@@ -19,6 +19,7 @@ spans if an exporter is ever added.
 """
 import asyncio
 import functools
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Span:
-    kind: str                 # node | llm
+    kind: str                 # node | llm | retrieval
     name: str
     duration_ms: int
     started_at: datetime
@@ -39,6 +40,7 @@ class Span:
     model: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    attributes: dict | None = None
 
 
 @dataclass
@@ -68,7 +70,8 @@ def _persist(trace: Trace) -> None:
         db.add_all([
             AgentSpan(tenant_id=trace.tenant_id, trace_id=trace.trace_id, source=trace.source, kind=s.kind,
                       name=s.name, model=s.model, input_tokens=s.input_tokens, output_tokens=s.output_tokens,
-                      duration_ms=s.duration_ms, status=s.status, started_at=s.started_at)
+                      duration_ms=s.duration_ms, status=s.status, started_at=s.started_at,
+                      attributes=json.dumps(s.attributes, ensure_ascii=False) if s.attributes else None)
             for s in trace.spans
         ])
         db.commit()
@@ -104,6 +107,13 @@ def record_llm_call(name: str, model: str | None, started: float, started_at: da
     _record(Span(kind="llm", name=name, model=model, started_at=started_at,
                  duration_ms=int((time.perf_counter() - started) * 1000), status="ok" if ok else "error",
                  input_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens")))
+
+
+def record_span(kind: str, name: str, duration_ms: int, started_at: datetime, *, status: str = "ok",
+                attributes: dict | None = None) -> None:
+    """A step that is neither a node nor an LLM call (e.g. a knowledge retrieval, Fase 14.7)."""
+    _record(Span(kind=kind, name=name, duration_ms=duration_ms, started_at=started_at, status=status,
+                 attributes=attributes))
 
 
 def traced_node(name: str, fn):

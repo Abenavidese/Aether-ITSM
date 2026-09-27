@@ -128,11 +128,23 @@ def wait_for_ticket(client: httpx.Client, external_id: str, want_status, timeout
     )
 
 
+def wait_for_documents(client: httpx.Client, filenames: set, timeout: int = 180) -> dict:
+    """Fase 14.6: uploads are indexed by the job queue — wait until they settle."""
+    deadline = time.time() + timeout
+    docs: dict = {}
+    while time.time() < deadline:
+        docs = {d["filename"]: d for d in client.get("/tenant/knowledge").json() if d["filename"] in filenames}
+        if len(docs) == len(filenames) and all(d["status"] in ("ready", "failed") for d in docs.values()):
+            return docs
+        time.sleep(2)
+    raise SystemExit(f"Timeout esperando la indexación de {filenames}: {docs}")
+
+
 def check_tenant_rag_isolation(suffix: str):
     """
     Calls retrieve_context() directly — the same function every agent node
     uses — to prove the tenant_id filter actually isolates data, instead of
-    just trusting that PGVector's dict-filter syntax behaves as expected.
+    just trusting that the store's tenant filter (and RLS) behave as expected.
     """
     from src.rag.service import retrieve_context
 
@@ -186,7 +198,10 @@ def main():
                 files={"file": (filename, f, "text/plain")},
                 data={"source_type": source_type},
             )
-        check(f"Subir {filename} como '{source_type}'", r.status_code == 200, r.text)
+        check(f"Subir {filename} como '{source_type}' (202, se indexa en la cola)", r.status_code == 202, r.text)
+    docs = wait_for_documents(client, {"guia_politicas_empresa.txt", "guia_tecnica_repo.txt"})
+    check("Los documentos quedaron indexados por el worker (ready, con chunks)",
+          all(d["status"] == "ready" and d["chunks"] > 0 for d in docs.values()), str(docs))
 
     webhook_headers = {"x-api-key": api_key}
 

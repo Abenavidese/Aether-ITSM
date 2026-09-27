@@ -160,7 +160,7 @@ Es lo que más distingue un proyecto de IA serio: medir en vez de adivinar.
 - El dashboard muestra tokens y costo del mes por tenant a partir de datos reales.
 
 ### 2.5 Row-Level Security en Postgres
-**Estado: HECHO en código y validado en un Neon temporal (2026-09-26). NO aplicado a Supabase** (`scripts/apply_rls.py` + `DB_RLS_ENABLED=true` cuando lo decidas).
+**Estado: HECHO (2026-09-26).** Validado en un Neon temporal y **aplicado a Supabase** (`scripts/apply_rls.py` + `DB_RLS_ENABLED=true`), con E2E real en verde.
 Hoy el aislamiento entre tenants depende solo de filtrar por `tenant_id` en
 cada consulta. RLS lo agrega como segunda capa a nivel de base de datos, así un
 filtro olvidado no expone datos de otra empresa.
@@ -202,6 +202,9 @@ checkpointer. Tampoco existe un botón de "nueva conversación".
 conversación" empieza con el contexto vacío.
 
 ### 3.3 Citas de las fuentes
+**Estado: HECHO para el RAG (Fase 14.5, 2026-09-27).** Pasajes numerados, citas
+validadas por código (`src/rag/citations.py`) y fuentes en la UI; el repo (ruta +
+línea) sigue con su validador de grounding propio.
 Cada respuesta debería indicar qué documento, archivo o línea la respaldó. Los
 datos ya existen: los chunks del RAG tienen un encabezado "Documento / Sección"
 y los archivos del repo tienen ruta y número de línea.

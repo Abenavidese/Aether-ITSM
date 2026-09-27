@@ -120,14 +120,27 @@ class Settings(BaseSettings):
     # Upper bound for one drain delivery; larger bodies are rejected (413).
     platform_log_max_body_bytes: int = 5_000_000
 
-    # ── RAG ──
-    # Max cosine distance (0 = identical, 2 = opposite) for a chunk to count
-    # as relevant in retrieve_context(). Calibrated against nomic-embed-text
-    # with task prefixes on the real KB docs (see docs/PLAN_IMPLEMENTACION.txt,
-    # Fase 9): worst relevant top-1 was 0.351, closest unrelated query 0.416.
-    # Re-check it when switching embedding models — distances aren't
-    # comparable across models.
-    rag_max_distance: float = 0.40
+    # ── RAG (Fase 14, src/rag/retrieval.py) ──
+    # Every value here was chosen with the retrieval eval (evals/rag) — re-run
+    # it before changing one, and after switching the embedding model.
+    rag_top_k: int = 5                       # passages that reach the model
+    rag_candidates: int = 20                 # per generator (dense/keyword/identifier) and reranked
+    # Cosine-distance cutoff used when no reranker is active. Empty = the
+    # calibrated default for the embedding model (retrieval.DEFAULT_MAX_DISTANCE).
+    rag_max_distance: float | None = None
+    # Reranker: "none", a local fastembed cross-encoder model id (ONNX, CPU,
+    # downloaded on first use — recommended: jinaai/jina-reranker-v2-base-multilingual,
+    # ~1.1 GB on disk and in RAM), or "api:<model>" for a hosted /rerank
+    # endpoint (Cohere/Jina/Voyage request shape) at RAG_RERANKER_API_URL.
+    rag_reranker: str = "none"
+    rag_rerank_min_score: float | None = None   # empty = calibrated default for the reranker
+    rag_reranker_budget_ms: int = 2500
+    rag_reranker_cache_dir: str = ""
+    rag_reranker_api_url: str = ""
+    rag_reranker_api_key: str | None = None
+    rag_rewrite_mode: str = "concat"         # off | concat | llm (follow-up questions)
+    rag_context_chars: int = 6000            # budget for all passages in one prompt
+    rag_query_log_retention_days: int = 30
 
     nebius_api_key: str | None = None
     openai_api_key: str | None = None

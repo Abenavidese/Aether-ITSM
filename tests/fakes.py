@@ -45,3 +45,10 @@ class RecordingMCP:
     async def call_tool(self, name, arguments):
         self.calls.append((name, dict(arguments)))
         return self._output
+
+
+def empty_retrieval(*args, **kwargs):
+    """Stand-in for src.rag.service.retrieve: the knowledge base found nothing."""
+    from src.rag.query import QueryPlan
+    from src.rag.retrieval import RetrievalResult
+    return RetrievalResult(plan=QueryPlan(original="", semantic="", terms=[], entities=[]))

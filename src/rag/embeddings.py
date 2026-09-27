@@ -14,7 +14,7 @@ _TASK_PREFIXES: dict[str, tuple[str, str]] = {
 class TaskPrefixedEmbeddings(Embeddings):
     """
     Decorator over any Embeddings that prepends the model's document/query
-    task prefixes. Only the vectors see the prefix — PGVector still stores
+    task prefixes. Only the vectors see the prefix — the store still keeps
     and returns the original, unprefixed text.
     """
 
@@ -41,6 +41,21 @@ def _with_task_prefixes(embeddings: Embeddings, model: str) -> Embeddings:
         if model.startswith(model_prefix):
             return TaskPrefixedEmbeddings(embeddings, doc_prefix, query_prefix)
     return embeddings
+
+
+def embedding_model_id() -> str:
+    """
+    "<provider>:<model>" of the configured embeddings. Stored on every chunk
+    (Fase 14.1): vectors from two models live in different spaces (often
+    different dimensions), so search only ever compares a query with chunks
+    embedded by the same model id.
+    """
+    settings = get_settings()
+    if settings.use_ollama:
+        return f"ollama:{settings.ollama_embedding_model}"
+    if settings.nebius_api_key:
+        return f"nebius:{settings.nebius_embedding_model}"
+    return f"openai:{settings.openai_embedding_model}"
 
 
 def get_embeddings() -> Embeddings:
@@ -71,4 +86,5 @@ def get_embeddings() -> Embeddings:
             "NEBIUS_API_KEY or OPENAI_API_KEY is required when USE_OLLAMA=False"
         )
 
-    return _with_task_prefixes(OpenAIEmbeddings(model=model, api_key=api_key, base_url=base_url), model)
+    from pydantic import SecretStr
+    return _with_task_prefixes(OpenAIEmbeddings(model=model, api_key=SecretStr(api_key), base_url=base_url), model)

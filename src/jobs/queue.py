@@ -36,6 +36,7 @@ _MAX_ERROR_CHARS = 1000
 class JobKind(str, Enum):
     RUN_TICKET = "run_ticket"
     CREATE_GITHUB_ISSUE = "create_github_issue"
+    INDEX_DOCUMENT = "index_document"
 
 
 class JobStatus(str, Enum):

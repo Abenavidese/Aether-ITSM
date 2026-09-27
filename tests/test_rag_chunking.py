@@ -1,9 +1,7 @@
 """
-Unit tests for contextual chunking (src/rag/chunking.py), the task-prefix
-embeddings wrapper, and the relevance cutoff in retrieve_context — no
-Ollama, no Postgres.
+Unit tests for contextual chunking (src/rag/chunking.py) and the task-prefix
+embeddings wrapper — no Ollama, no Postgres. Retrieval: tests/test_rag_retrieval.py.
 """
-from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
 from src.rag.chunking import CHUNKER_VERSION, chunk_document, split_sections
@@ -101,15 +99,3 @@ def test_nomic_gets_task_prefixes_and_other_models_do_not():
     assert inner.seen == ["search_document: doc", "search_query: q"]
 
     assert _with_task_prefixes(inner, "text-embedding-3-small") is inner
-
-
-def test_retrieve_context_drops_chunks_beyond_max_distance(monkeypatch):
-    from src.rag import service
-
-    class _FakeStore:
-        def similarity_search_with_score(self, query, k, filter):
-            return [(Document(page_content="relevant"), 0.2), (Document(page_content="noise"), 0.9)]
-
-    monkeypatch.setattr(service, "get_vector_store", lambda: _FakeStore())
-    context = service.retrieve_context("t1", "q")
-    assert "relevant" in context and "noise" not in context

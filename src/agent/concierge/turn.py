@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 
 from src.integrations.logs.service import ServiceDiagnosis
+from src.rag.retrieval import RetrievalResult
 
 from .repo_view import RepoView
 
@@ -10,8 +11,10 @@ from .repo_view import RepoView
 class TurnContext:
     user_query: str
     recent_text: str
-    policy_context: str = ""
-    tech_context: str = ""
+    # Fase 14: one hybrid search over policies + technical docs, numbered
+    # passages the model cites as [n].
+    knowledge: RetrievalResult | None = None
+    knowledge_context: str = ""
     code_context: str = ""
     directory_context: str = ""
     file_context: str = ""
@@ -26,6 +29,6 @@ class TurnContext:
         never earlier assistant turns, or one past hallucination would
         legitimize the next."""
         return "\n".join([
-            self.policy_context, self.tech_context, self.code_context, self.directory_context,
+            self.knowledge_context, self.code_context, self.directory_context,
             self.file_context, self.diagnosis_context, user_text,
         ])

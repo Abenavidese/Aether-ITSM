@@ -1,0 +1,74 @@
+{"id": "vpn-01", "category": "paraphrase", "query": "¿Cómo pido acceso a la VPN para trabajar desde casa?", "targets": [{"file": "politica_acceso_vpn.md", "section": "Solicitud de acceso VPN"}]}
+{"id": "vpn-02", "category": "exact_code", "query": "me sale ERR_VPN_809", "targets": [{"file": "politica_acceso_vpn.md", "section": "Error ERR_VPN_809"}]}
+{"id": "vpn-03", "category": "paraphrase", "query": "en el hotel no me conecta el túnel de la vpn", "targets": [{"file": "politica_acceso_vpn.md", "section": "Error ERR_VPN_809"}]}
+{"id": "vpn-04", "category": "keyword", "query": "¿Puedo usar WireGuard u OpenVPN?", "targets": [{"file": "politica_acceso_vpn.md", "section": "Cliente VPN soportado"}]}
+{"id": "vpn-05", "category": "paraphrase", "query": "me aparece que tengo una sesión duplicada", "targets": [{"file": "politica_acceso_vpn.md", "section": "Sesiones simultáneas"}]}
+{"id": "vpn-06", "category": "paraphrase", "query": "voy a viajar a España, ¿puedo conectarme a la red de la empresa desde allá?", "targets": [{"file": "politica_acceso_vpn.md", "section": "Acceso desde el extranjero"}]}
+{"id": "vpn-07", "category": "cross_lingual", "query": "which VPN client am I allowed to install?", "targets": [{"file": "politica_acceso_vpn.md", "section": "Cliente VPN soportado"}]}
+{"id": "vpn-08", "category": "follow_up", "history": ["¿Cómo pido acceso a la VPN?"], "query": "¿y cuánto dura para un contratista?", "targets": [{"file": "politica_acceso_vpn.md", "section": "Solicitud de acceso VPN"}]}
+{"id": "vpn-09", "category": "follow_up", "history": ["me sale ERR_VPN_809 en el aeropuerto"], "query": "ya probé con el hotspot y sigue igual, ¿qué más hago?", "targets": [{"file": "politica_acceso_vpn.md", "section": "Error ERR_VPN_809"}]}
+{"id": "iam-01", "category": "paraphrase", "query": "necesito permisos de administrador en AWS", "targets": [{"file": "politica_accesos_aws_iam.md", "section": "Roles permitidos"}, {"file": "politica_accesos_aws_iam.md", "section": "Aprobación del manager"}, {"file": "politica_accesos_aws_iam.md", "section": "Duración máxima de un acceso"}]}
+{"id": "iam-02", "category": "paraphrase", "query": "¿por cuánto tiempo me dan el rol Developer en AWS?", "targets": [{"file": "politica_accesos_aws_iam.md", "section": "Duración máxima de un acceso"}]}
+{"id": "iam-03", "category": "keyword", "query": "¿quién tiene que aprobar el rol Admin?", "targets": [{"file": "politica_accesos_aws_iam.md", "section": "Aprobación del manager"}]}
+{"id": "iam-04", "category": "keyword", "query": "cuenta break-glass en un incidente de noche", "targets": [{"file": "politica_accesos_aws_iam.md", "section": "Acceso de emergencia"}]}
+{"id": "iam-05", "category": "cross_lingual", "query": "can I get an IAM user with long-lived access keys?", "targets": [{"file": "politica_accesos_aws_iam.md", "section": "Roles permitidos"}]}
+{"id": "iam-06", "category": "follow_up", "history": ["¿Por cuánto tiempo me dan el rol Developer en AWS?"], "query": "¿y el de Admin?", "targets": [{"file": "politica_accesos_aws_iam.md", "section": "Duración máxima de un acceso"}]}
+{"id": "iam-07", "category": "paraphrase", "query": "revisión de accesos cada tres meses", "targets": [{"file": "politica_accesos_aws_iam.md", "section": "Revisión trimestral"}]}
+{"id": "mdm-01", "category": "keyword", "query": "¿cómo instalo Docker Desktop?", "targets": [{"file": "politica_software_mdm.md", "section": "Docker Desktop"}]}
+{"id": "mdm-02", "category": "exact_code", "query": "no me aparece pkg_docker en el portal", "targets": [{"file": "politica_software_mdm.md", "section": "Docker Desktop"}]}
+{"id": "mdm-03", "category": "paraphrase", "query": "quiero instalar un programa que no está en el catálogo", "targets": [{"file": "politica_software_mdm.md", "section": "Software no catalogado"}]}
+{"id": "mdm-04", "category": "keyword", "query": "me desinstalaron AnyDesk", "targets": [{"file": "politica_software_mdm.md", "section": "Desinstalación y equipos no conformes"}]}
+{"id": "mdm-05", "category": "paraphrase", "query": "mi equipo dice no conforme y perdí el correo", "targets": [{"file": "politica_software_mdm.md", "section": "Desinstalación y equipos no conformes"}]}
+{"id": "mdm-06", "category": "keyword", "query": "¿qué paquetes se instalan sin aprobación?", "targets": [{"file": "politica_software_mdm.md", "section": "Catálogo de software aprobado"}]}
+{"id": "pwd-01", "category": "paraphrase", "query": "¿cuántos caracteres debe tener mi clave?", "targets": [{"file": "politica_contrasenas_mfa.md", "section": "Requisitos de la contraseña"}]}
+{"id": "pwd-02", "category": "paraphrase", "query": "cambié de celular y perdí el autenticador", "targets": [{"file": "politica_contrasenas_mfa.md", "section": "Pérdida o cambio del teléfono con MFA"}]}
+{"id": "pwd-03", "category": "paraphrase", "query": "mi cuenta se bloqueó por poner mal la contraseña", "targets": [{"file": "politica_contrasenas_mfa.md", "section": "Bloqueo de cuenta"}]}
+{"id": "pwd-04", "category": "paraphrase", "query": "¿cada cuánto tengo que cambiar la contraseña?", "targets": [{"file": "politica_contrasenas_mfa.md", "section": "Rotación"}]}
+{"id": "pwd-05", "category": "cross_lingual", "query": "is SMS allowed as a second factor?", "targets": [{"file": "politica_contrasenas_mfa.md", "section": "MFA obligatorio"}]}
+{"id": "pwd-06", "category": "follow_up", "history": ["mi cuenta se bloqueó por poner mal la contraseña"], "query": "¿cuánto tiempo tengo que esperar?", "targets": [{"file": "politica_contrasenas_mfa.md", "section": "Bloqueo de cuenta"}]}
+{"id": "eq-01", "category": "paraphrase", "query": "me robaron la laptop en el bus", "targets": [{"file": "politica_equipos_teletrabajo.md", "section": "Robo o pérdida del equipo"}]}
+{"id": "eq-02", "category": "paraphrase", "query": "¿me pueden dar un monitor para trabajar en casa?", "targets": [{"file": "politica_equipos_teletrabajo.md", "section": "Periféricos y monitores"}]}
+{"id": "eq-03", "category": "paraphrase", "query": "¿puedo trabajar desde el wifi de una cafetería?", "targets": [{"file": "politica_equipos_teletrabajo.md", "section": "Redes wifi públicas"}]}
+{"id": "eq-04", "category": "keyword", "query": "¿cuánta RAM tiene la laptop de desarrollo?", "targets": [{"file": "politica_equipos_teletrabajo.md", "section": "Asignación de laptops"}]}
+{"id": "dat-01", "category": "paraphrase", "query": "¿puedo pasar archivos a un proveedor en una memoria USB?", "targets": [{"file": "politica_clasificacion_datos.md", "section": "Memorias USB y medios extraíbles"}]}
+{"id": "dat-02", "category": "paraphrase", "query": "¿los datos de tarjetas qué clasificación tienen?", "targets": [{"file": "politica_clasificacion_datos.md", "section": "Niveles de clasificación"}]}
+{"id": "dat-03", "category": "paraphrase", "query": "¿cuánto tiempo se guardan las grabaciones de las reuniones?", "targets": [{"file": "politica_clasificacion_datos.md", "section": "Retención y borrado"}]}
+{"id": "sec-01", "category": "paraphrase", "query": "I clicked a link in a suspicious email", "targets": [{"file": "security_incident_response.md", "section": "Reporting a phishing email"}]}
+{"id": "sec-02", "category": "cross_lingual", "query": "el antivirus me muestra una alerta de malware, ¿apago la laptop?", "targets": [{"file": "security_incident_response.md", "section": "Malware alert on a laptop"}]}
+{"id": "sec-03", "category": "keyword", "query": "what counts as a SEV2?", "targets": [{"file": "security_incident_response.md", "section": "Severity levels"}]}
+{"id": "sec-04", "category": "cross_lingual", "query": "¿a qué extensión llamo para seguridad fuera de horario?", "targets": [{"file": "security_incident_response.md", "section": "Contact and escalation"}]}
+{"id": "pay-01", "category": "exact_code", "query": "los cobros fallan con PAY-4012", "targets": [{"file": "runbook_api_pagos.md", "section": "Error PAY-4012"}]}
+{"id": "pay-02", "category": "exact_code", "query": "¿qué significa PAY-2001?", "targets": [{"file": "runbook_api_pagos.md", "section": "Error PAY-2001"}]}
+{"id": "pay-03", "category": "keyword", "query": "¿cómo roto PAYGATE_API_SECRET?", "targets": [{"file": "runbook_api_pagos.md", "section": "Rotación de credenciales de la pasarela"}]}
+{"id": "pay-04", "category": "paraphrase", "query": "¿dónde veo los logs del servicio de pagos?", "targets": [{"file": "runbook_api_pagos.md", "section": "Dónde mirar los logs"}]}
+{"id": "pay-05", "category": "follow_up", "history": ["los cobros fallan con PAY-4012"], "query": "¿el cliente debe volver a pagar?", "targets": [{"file": "runbook_api_pagos.md", "section": "Error PAY-4012"}]}
+{"id": "db-01", "category": "exact_code", "query": "error: too many clients already", "targets": [{"file": "runbook_base_datos.md", "section": "Conexiones agotadas"}]}
+{"id": "db-02", "category": "paraphrase", "query": "borré filas de una tabla por error, ¿se pueden recuperar?", "targets": [{"file": "runbook_base_datos.md", "section": "Restaurar datos borrados por error"}, {"file": "runbook_base_datos.md", "section": "Backups"}]}
+{"id": "db-03", "category": "paraphrase", "query": "los reportes muestran datos de hace horas", "targets": [{"file": "runbook_base_datos.md", "section": "Réplica de lectura atrasada"}]}
+{"id": "db-04", "category": "keyword", "query": "¿en qué puerto está PgBouncer?", "targets": [{"file": "runbook_base_datos.md", "section": "Conexiones agotadas"}]}
+{"id": "fe-01", "category": "keyword", "query": "VITE_API_URL sale undefined en el navegador", "targets": [{"file": "guia_despliegue_frontend.md", "section": "Variables de entorno"}]}
+{"id": "fe-02", "category": "paraphrase", "query": "¿cómo regreso el frontend a la versión anterior?", "targets": [{"file": "guia_despliegue_frontend.md", "section": "Volver a una versión anterior"}]}
+{"id": "fe-03", "category": "exact_code", "query": "Build exceeded maximum duration en Vercel", "targets": [{"file": "guia_despliegue_frontend.md", "section": "Error \"Build exceeded maximum duration\""}]}
+{"id": "mail-01", "category": "paraphrase", "query": "no puedo enviar correos, dice que el buzón está lleno", "targets": [{"file": "faq_correo_outlook.md", "section": "Buzón lleno"}]}
+{"id": "mail-02", "category": "paraphrase", "query": "quiero que mis correos se reenvíen a mi gmail", "targets": [{"file": "faq_correo_outlook.md", "section": "Reenvío automático a correos externos"}]}
+{"id": "mail-03", "category": "paraphrase", "query": "outlook no descarga correos nuevos pero en la web sí llegan", "targets": [{"file": "faq_correo_outlook.md", "section": "Outlook no sincroniza"}]}
+{"id": "dev-01", "category": "cross_lingual", "query": "¿qué versión de Node necesito para el proyecto?", "targets": [{"file": "developer_onboarding.md", "section": "Local environment"}]}
+{"id": "dev-02", "category": "keyword", "query": "I committed a secret to the repo by mistake", "targets": [{"file": "developer_onboarding.md", "section": "Secrets in development"}]}
+{"id": "dev-03", "category": "paraphrase", "query": "how many approvals does a pull request need?", "targets": [{"file": "developer_onboarding.md", "section": "Code review rules"}]}
+{"id": "glo-01", "category": "keyword", "query": "¿qué es el TMS?", "targets": [{"file": "glosario_sistemas.txt", "section": "TMS"}]}
+{"id": "glo-02", "category": "keyword", "query": "¿para qué sirve el bastión?", "targets": [{"file": "glosario_sistemas.txt", "section": "Bastión"}]}
+{"id": "prn-01", "category": "table", "query": "¿cuál es la IP de la impresora del piso 3?", "targets": [{"file": "manual_impresoras.pdf", "section": "Impresoras por piso"}]}
+{"id": "prn-02", "category": "table", "query": "¿qué cola de impresión uso en finanzas?", "targets": [{"file": "manual_impresoras.pdf", "section": "Impresoras por piso"}]}
+{"id": "prn-03", "category": "exact_code", "query": "la impresora muestra E-12", "targets": [{"file": "manual_impresoras.pdf", "section": "Codigos de error de las impresoras"}]}
+{"id": "prn-04", "category": "exact_code", "query": "la impresora dice E-05", "targets": [{"file": "manual_impresoras.pdf", "section": "Codigos de error de las impresoras"}]}
+{"id": "prn-05", "category": "paraphrase", "query": "¿cómo imprimo un documento confidencial sin que otros lo vean?", "targets": [{"file": "manual_impresoras.pdf", "section": "Impresion segura"}]}
+{"id": "na-01", "category": "no_answer", "query": "¿cuántos días de vacaciones me corresponden al año?", "targets": []}
+{"id": "na-02", "category": "no_answer", "query": "¿cuál es el menú del comedor esta semana?", "targets": []}
+{"id": "na-03", "category": "no_answer", "query": "how do I request a parking spot?", "targets": []}
+{"id": "na-04", "category": "no_answer", "query": "¿la empresa paga cursos de inglés?", "targets": []}
+{"id": "na-05", "category": "no_answer", "query": "error KUBE-7731 en el clúster de kubernetes", "targets": []}
+{"id": "na-06", "category": "no_answer", "query": "¿cuándo es la fiesta de fin de año?", "targets": []}
+{"id": "na-07", "category": "no_answer", "query": "¿cómo configuro Slack en el celular?", "targets": []}
+{"id": "na-08", "category": "no_answer", "query": "¿cuál es el horario de atención de recursos humanos?", "targets": []}
+{"id": "na-09", "category": "no_answer", "query": "what is the dress code on Fridays?", "targets": []}
+{"id": "na-10", "category": "no_answer", "query": "¿cómo pido un reembolso de gastos de taxi?", "targets": []}

@@ -3,3 +3,7 @@ pytest==9.1.1
 pytest-asyncio==1.4.0
 ruff==0.16.9
 mypy==2.3.1
+
+# Only for the RAG eval's legacy baseline (evals/rag/systems.py:LegacySystem);
+# the app no longer uses it (Fase 14.1).
+langchain-postgres==0.0.17

@@ -931,7 +931,7 @@ FASE 12 - ROBUSTEZ Y ARQUITECTURA (docs/ROADMAP_NEXT_LEVEL.md, seccion 2)
         software. Siguiente paso: opcion --tenant para evaluar con la guia de
         politicas cargada; y comparar supervisor 1B vs 8B.
 
-12.5 [~] Row-Level Security: rol aether_tenant + politicas por tenant
+12.5 [DONE] Row-Level Security: rol aether_tenant + politicas por tenant
         (src/db/rls/enable.sql, rollback disable.sql, idempotentes),
         scripts/apply_rls.py, sesiones con tenant en Session.info que hacen
         SET LOCAL ROLE + set_config por transaccion (src/db/tenant_scope.py),
@@ -941,9 +941,23 @@ FASE 12 - ROBUSTEZ Y ARQUITECTURA (docs/ROADMAP_NEXT_LEVEL.md, seccion 2)
         insertar/actualizar filas de otro tenant falla, el scope no se filtra
         al siguiente uso de la conexion del pool. El test encontro un bug en
         apply_rls.py (el driver leia el %I de format() como placeholder).
-        PENDIENTE (decision del dueno): aplicar a Supabase y activar
-        DB_RLS_ENABLED=true. La busqueda vectorial (PGVector usa su propio
-        engine) sigue protegida solo por el filtro en codigo.
+        APLICADO A SUPABASE (2026-09-26, aprobado por el dueno): respaldo
+        previo con pg_dump 17 (fuera del repo, ~/aether-backups/), luego
+        apply_rls.py y DB_RLS_ENABLED=true en .env. RLS activo en tickets,
+        companies, users, agent_spans, knowledge_audit, log_access_audit,
+        platform_logs y langchain_pg_embedding. CHECK real en Supabase: con
+        rol aether_tenant y tenant acme -> 2 tickets, 0 de otro tenant,
+        1 company, 1 user, 14 chunks; tenant inexistente o sin fijar -> 0
+        en todo. tenant_session() de la app corre como aether_tenant; las
+        sesiones sin tenant (login, jobs) siguen como postgres. pytest 249
+        verde; scripts/e2e_ollama.py completo en verde contra Supabase con
+        RLS activo, sin errores de permisos en el log. Efecto extra: con RLS
+        encendido, anon/authenticated de la Data API de Supabase ya no ven
+        esas tablas. Rollback: DB_RLS_ENABLED=false, luego
+        apply_rls.py --rollback.
+        Sigue pendiente: la busqueda vectorial (PGVector usa su propio
+        engine) esta protegida solo por el filtro en codigo; tablas nuevas
+        requieren volver a correr apply_rls.py (idempotente).
 
 Tests: 221 passed + 5 RLS (skipped sin RLS_TEST_DATABASE_URL). tsc -b sin
 errores nuevos.
@@ -1042,6 +1056,253 @@ FASE 13 - CREDIBILIDAD (docs/ROADMAP_NEXT_LEVEL.md, seccion 1) - 2026-09-26
 
 Tests: 249 passed + 5 RLS (skipped sin RLS_TEST_DATABASE_URL). ruff y mypy
 limpios. tsc -b y vite build sin errores.
+
+
+FASE 14 - RAG DE NIVEL SENIOR (PLAN 2026-09-26, IMPLEMENTADA 2026-09-27)
+===========================================================
+Diagnostico del RAG actual (leido del codigo y de Supabase, no de docs):
+- Busqueda SOLO densa (coseno). Consultas ITSM traen tokens exactos
+  (codigos de error, "ERR_VPN_809", nombres de servicio, rutas) donde un
+  embedding falla; no hay busqueda por palabras clave.
+- Sin reranking; top_k=4 fijo por fuente y umbral ABSOLUTO de distancia
+  0.40, calibrado para nomic-embed-text: al cambiar a embeddings de Nebius
+  (otra escala, otras dimensiones) el umbral deja de significar algo.
+- La consulta es el mensaje crudo del usuario: un seguimiento ("¿y para la
+  VPN?") se busca sin el contexto de la conversacion.
+- Almacen = tabla generica de langchain-postgres: vector sin dimension
+  fija, SIN indice vectorial (solo GIN sobre el JSONB; seq scan), tenant en
+  JSON, y la busqueda usa el engine propio de PGVector como rol postgres
+  -> la RLS aplicada hoy NO cubre la recuperacion (solo list/delete).
+- No hay registro de documentos: la lista de archivos sale de un DISTINCT
+  sobre chunks; sin version, estado, hash ni modelo de embedding guardado.
+  Mezclar vectores de dos modelos distintos no se detecta.
+- Ingesta sincrona dentro del request HTTP (la cola durable de src/jobs
+  existe y no se usa para esto).
+- Sin citas: el modelo recibe los pasajes pero la respuesta no dice de que
+  documento/seccion/pagina sale (roadmap 3.3), y el validador de grounding
+  solo cubre el repo, no las politicas.
+- Sin evaluacion de recuperacion: evals/ mide el agente (tools, riesgo),
+  no si el RAG trae el pasaje correcto. El corpus de prueba son 2 archivos
+  de 3-4 KB: cualquier cambio "mejora" o "empeora" sin que se pueda medir.
+- ai_feedback: texto libre de un admin que entra directo al prompt de
+  ejecucion, sin revision ni caducidad.
+
+Principio de la fase: MEDIR PRIMERO. 14.0 fija la linea base; cada item
+siguiente se queda solo si mejora las metricas (o las mantiene y aporta
+seguridad/operacion), con los numeros anotados aqui.
+
+14.0 [DONE] EVALUACION DE RECUPERACION (prerequisito de todo lo demas)
+        [ ] Corpus sintetico realista en evals/rag/corpus/: ~12-15 docs
+            (politicas, runbooks, FAQ, un PDF con tabla y varias paginas,
+            ES y EN, secciones parecidas entre si como distractores, codigos
+            de error, un documento de OTRO tenant).
+        [ ] Dataset dorado (~60 consultas): consulta -> documento+seccion
+            esperados; incluye seguimientos con historial, consultas con
+            codigo exacto, parafrasis, consultas en otro idioma y ~10 SIN
+            respuesta en el corpus (debe volver vacio).
+        [ ] evals/rag/run.py: recall@k, MRR, nDCG@5, precision de
+            "sin respuesta", fuga entre tenants (debe ser 0), latencia p50/
+            p95. Reporte JSON+MD en evals/reports/ como los evals actuales.
+        [ ] Nivel respuesta (con Ollama 8B como juez, sobre un subconjunto):
+            fidelidad al contexto y exactitud de citas (tras 14.5).
+        CHECK: linea base del RAG actual anotada aqui con numeros reales;
+        el eval corre con `python -m evals.rag.run` y se agrega a --suite all.
+
+14.1 [DONE] ALMACEN PROPIO: knowledge_documents + knowledge_chunks
+        [ ] knowledge_documents: id, tenant_id, filename, source_type,
+            sha256, version, status (pending/indexing/ready/failed), error,
+            chunk_count, embedding_model, chunker_version, timestamps.
+        [ ] knowledge_chunks: tenant_id (columna, no JSON), document_id,
+            section, page, chunk_index, content, embedding vector(N) con N
+            fijo, tsvector generado, metadata; indice HNSW (cosine), GIN
+            sobre tsvector, btree (tenant_id, source_type).
+        [ ] Migracion Alembic + politicas RLS de ambas tablas en enable.sql;
+            TODAS las consultas (tambien la busqueda) via tenant_session ->
+            cierra el hueco de RLS de hoy.
+        [ ] Guardia de modelo: si embedding_model/dimension de la config no
+            coincide con lo indexado, se avisa y se ofrece reindexar; nunca
+            se mezclan vectores.
+        [ ] Script de migracion desde langchain_pg_embedding (reindexa desde
+            el texto guardado); luego se elimina langchain-postgres.
+        CHECK: eval 14.0 sin regresion; EXPLAIN muestra uso del HNSW;
+        tests RLS en Postgres: busqueda con tenant A no devuelve chunks de B
+        aunque se omita el filtro en codigo; reindex_rag funciona.
+
+14.2 [DONE] BUSQUEDA HIBRIDA (densa + palabras clave) con RRF
+        [ ] Full-text de Postgres (config 'simple' + unaccent, para ES/EN) y
+            vector en UNA consulta SQL, fusionados con Reciprocal Rank
+            Fusion; candidatos amplios (p.ej. 30) para el paso siguiente.
+        [ ] Umbral relativo/calibrado por modelo en vez de 0.40 absoluto.
+        CHECK: recall@5 sube en consultas con codigos exactos sin bajar en
+        parafrasis; precision de "sin respuesta" se mantiene.
+
+14.3 [DONE] RERANKING (interfaz Reranker, se queda solo si el eval lo justifica)
+        [ ] Implementaciones: Noop, cross-encoder local (bge-reranker-v2-m3,
+            dependencia opcional), y reranker hosted (Nebius/Cohere-like)
+            para produccion; eleccion por .env como los modelos.
+        [ ] Presupuesto de latencia: si el rerank excede X ms, se usa el
+            orden hibrido (degradacion, no error).
+        CHECK: nDCG@5 / MRR mejoran de forma medible; p95 dentro del
+        presupuesto; si no mejora, se documenta y queda en Noop.
+
+14.4 [DONE] ENTENDIMIENTO DE LA CONSULTA
+        [ ] Reescritura conversacional con el modelo nano: solo cuando el
+            turno es un seguimiento, produce una consulta autonoma; la
+            original se conserva para la parte de palabras clave.
+        [ ] Extraccion deterministica de entidades (codigos de error, rutas,
+            nombres de servicio) que refuerzan la parte full-text.
+        [ ] Una sola busqueda sobre ambas fuentes con source_type como
+            filtro/peso, en vez de 2 busquedas fijas de top_k=4.
+        CHECK: recall@5 de las consultas de seguimiento sube claramente;
+        la reescritura nunca sale del tenant ni agrega hechos (test).
+
+14.5 [DONE] ARMADO DEL CONTEXTO Y CITAS (absorbe roadmap 3.3)
+        [ ] Dedupe, expansion a chunks vecinos de la misma seccion
+            ("small-to-big") y presupuesto de tokens del context_budget.
+        [ ] Pasajes numerados [1]..[n] con documento/seccion/pagina; el
+            prompt exige citar; validador deterministico: citas a numeros
+            inexistentes se eliminan, afirmacion de politica sin cita se
+            marca.
+        [ ] API y frontend: la respuesta trae sus fuentes (chips con doc,
+            seccion, pagina).
+        CHECK: exactitud de citas >= 0.9 en el subconjunto juzgado; ningun
+        [n] inventado sobrevive al validador; UI muestra las fuentes.
+
+14.6 [~] INGESTA ROBUSTA Y ASINCRONA
+        [ ] La subida guarda el documento como pending y encola un job
+            (src/jobs): parseo, chunking, embeddings por lotes con reintento;
+            la UI muestra el estado (indexing/ready/failed + motivo).
+        [ ] Mismo sha256 -> no se reindexa; nueva version reemplaza de forma
+            atomica (la version anterior sigue sirviendo hasta que la nueva
+            esta lista).
+        [ ] PDFs: tablas preservadas como texto estructurado; paginas sin
+            texto (escaneadas) detectadas y reportadas (OCR = Planned).
+        [ ] ai_feedback: entra como "pendiente de revision", solo se usa
+            aprobado, con autor y fecha visibles en la cita.
+        CHECK: subir un PDF de 20 paginas responde en <1 s y el doc pasa a
+        ready solo; re-subir el mismo archivo no genera embeddings; matar el
+        worker a mitad y reiniciarlo termina la indexacion.
+
+14.7 [DONE] OBSERVABILIDAD DEL RAG
+        [ ] Span por recuperacion (agent_spans): consulta reescrita, ids y
+            puntajes de candidatos, rerank, latencias por etapa, contexto
+            vacio si/no.
+        [ ] Dashboard admin: tasa de "sin contexto", documentos mas usados,
+            documentos nunca recuperados, consultas sin respuesta (para
+            saber que documentar).
+        CHECK: un chat real deja su span con etapas y tiempos; el dashboard
+        muestra las metricas del tenant (y solo del tenant).
+
+Fuera de alcance por ahora (Planned): OCR, GraphRAG, fine-tuning de
+embeddings, "contextual retrieval" con LLM por chunk (9.6, requiere Nebius).
+Orden: 14.0 -> 14.1 -> 14.2 -> 14.3 -> 14.4 -> 14.5 -> 14.6 -> 14.7
+(14.6 puede ir antes de 14.2 si se prioriza operacion sobre calidad).
+
+
+RESULTADO FASE 14 (implementacion, 2026-09-27)
+-----------------------------------------------------------
+Codigo: src/rag/ (text, parsing, chunking, store, retrieval, query,
+rerank, citations, documents, jobs, insights, service, router, admin),
+migraciones 0003 (knowledge_documents/chunks, rag_queries,
+agent_spans.attributes) y 0004 (ver hallazgo abajo). evals/rag/ (corpus
+de 16 docs en 2 tenants incl. un PDF con tabla y pagina escaneada,
+dataset de 74 consultas, run.py, calibrate.py, build_pdf.py).
+langchain-postgres sale de requirements.txt (queda en -dev solo para
+reproducir la linea base).
+
+Eval de recuperacion (evals/rag, Ollama nomic-embed-text, Postgres 17 +
+pgvector local; mismos 74 casos para todos):
+
+  metrica            legacy  +parser/  +hibrida  +reescr.  +rerank Jina
+                             almacen                      (final)
+  hit@1              0.625   0.688     0.750     0.797     0.938
+  hit@5              0.781   0.859     0.906     0.938     0.984
+  MRR@10             0.689   0.760     0.816     0.863     0.961
+  nDCG@5             0.709   -         -         0.876     0.957
+  sin respuesta ok   0.20    0.20      0.20      0.20      0.80
+  fugas de tenant    0       0         0         0         0
+  latencia p50       112 ms  74 ms     81 ms     67 ms     643 ms
+  por categoria (hit@5, legacy -> final): tablas 0.0 -> 1.0, codigos
+  exactos 0.75 -> 1.0, seguimientos 0.4 -> 1.0, otro idioma 0.5 -> 1.0,
+  parafrasis 0.897 -> 1.0, palabras clave 0.929 -> 0.929.
+
+Decisiones tomadas CON el eval (no a ojo):
+- Reranker: jina-reranker-v2-base-multilingual (ONNX via fastembed, sin
+  PyTorch). ms-marco-MiniLM (solo ingles) no mejoro nada -> descartado.
+  Costo: ~0.65 s p50 en CPU de laptop y ~1.1 GB de disco/RAM; por eso el
+  default del codigo es "none" y se activa por .env. Para Render con poca
+  RAM existe "api:<modelo>" (endpoint /rerank estilo Cohere/Jina/Voyage).
+- Umbral del reranker -1.9 (evals/rag/calibrate.py): punto de equilibrio
+  hit@5 vs "sin respuesta", redondeado hacia recall. Sin reranker, las
+  distancias de nomic NO separan relevante de irrelevante (irrelevantes
+  0.33-0.48, relevantes hasta 0.41): se mantiene 0.40 priorizando recall
+  y la deteccion de "no hay respuesta" depende del reranker.
+- Reescritura de seguimientos: "concat" (mensaje anterior + actual). La
+  variante con LLM (nano) no mejoro (hit@1 0.906 vs 0.938) y subio p95 a
+  1.4 s -> queda disponible pero no por defecto. Guarda: una reescritura
+  que agrega palabras que no estaban en la conversacion se descarta.
+- Identificador pedido que no existe en ningun documento (KUBE-7731): el
+  umbral sube (+1.0 en reranker / -0.05 en distancia) para no responder
+  con pasajes genericos.
+Limite honesto: 74 consultas y 10 "sin respuesta" es un dataset chico;
+los umbrales se recalibran con consultas reales (rag_queries + insights).
+
+Verificado con ejecucion real:
+- pytest 287 passed + 7 skipped (tests/test_rag_retrieval.py 28,
+  test_rag_api.py 5, test_rag_eval.py 5, migraciones 7). Evals de LLM con
+  el prompt/esquema nuevo del Concierge (Ollama real, sobre la copia):
+  concierge pass_rate 1.0 (10/10); tickets unsafe_actions 0, route 0.619
+  (igual que la corrida anterior), tool 0.75 (antes 0.70), risk_band
+  0.639 (antes 0.694: lo decide el supervisor nano, que no usa RAG ni se
+  toco; variacion del modelo local). RLS en Postgres real 7/7, incluido:
+  busqueda densa/keyword/identificador con tenant A no ve chunks de B
+  aunque se omita el filtro en codigo, y EXPLAIN usa el indice HNSW del
+  modelo (ix_knowledge_chunks_hnsw_<hash>). ruff y mypy limpios (mypy ahora
+  cubre los modulos de recuperacion de src/rag). tsc -b sin errores.
+- Ensayo de produccion sobre una COPIA de Supabase (pg_dump restaurado en
+  Postgres local, Supabase no se toco): migrate (adopcion 0001 -> 0004),
+  apply_rls, `python -m src.rag.admin migrate-legacy --apply` (18 docs,
+  118 chunks, texto reconstruido 98.5% igual al original), E2E
+  scripts/e2e_ollama.py completo en verde con RLS + reranker, y chat real:
+  ERR_VPN_809 -> pasos correctos citando politica_acceso_vpn.md#Error
+  ERR_VPN_809; seguimiento "¿y si ya probé con el hotspot?" -> siguiente
+  paso correcto; "IP impresora piso 3" -> 10.20.3.15 citando
+  manual_impresoras.pdf#Impresoras por piso p.1; pregunta en ingles ->
+  respuesta en ingles con la fuente; "vacaciones" -> sin fuentes, sin
+  inventar.
+- Hallazgo del chat real (corregido): el 8B citaba [n] en 1 de 4
+  respuestas fundamentadas, aun con un campo estructurado. Se agrego
+  atribucion por evidencia (src/rag/citations.py:attribute): un pasaje
+  es fuente si la respuesta reutiliza >= 3 terminos distintivos suyos o un
+  identificador exacto que NO venian en la pregunta. Tras el cambio: 4 de
+  4 con la fuente correcta, 0 fuentes en la respuesta sin fundamento.
+- HALLAZGO (migracion 0004): el esquema real de Supabase NO tiene
+  ix_companies_api_key_hash (unico), ix_tickets_external_id ni
+  uq_ticket_tenant_external (la mitad en BD de la idempotencia del
+  webhook). La app vieja nunca los creo y la adopcion estampa la BD como
+  0001. 0004 los crea solo si faltan (sin duplicados en la copia). Con
+  0004, `alembic check` queda limpio en la copia y en una BD nueva.
+
+14.6 queda [~]: subida 202 + indexacion en la cola verificada en vivo;
+NO medidos: el tiempo de subida de un PDF de 20 paginas y matar el worker
+a mitad de una indexacion (la garantia viene de la cola generica, probada
+para tickets; el handler es idempotente por (documento, version)).
+
+PENDIENTE (decision del dueno, nada de esto se hizo en Supabase):
+- `python -m src.db.migrate` en Supabase: aplica 0002 (borra las 4
+  columnas muertas), 0003 (tablas del RAG) y 0004 (indices faltantes).
+  Hasta entonces la app contra Supabase corre sin RAG: retrieve() degrada
+  a "sin contexto" (no falla el chat) porque las tablas no existen.
+- Luego `python scripts/apply_rls.py` (idempotente: agrega las 3 tablas
+  nuevas a RLS) y `python -m src.rag.admin migrate-legacy --apply`.
+- Incidente de esta sesion: un servidor temporal viejo (proceso hijo
+  huerfano en :8001, codigo anterior, apuntando a Supabase) recibio por
+  error un E2E: quedo en Supabase el tenant "Vertex E2E e87db975" (2
+  usuarios, 7 chunks en la tabla vieja, 0 tickets). Mismo tipo de datos
+  que los E2E anteriores; no se borro sin aprobacion.
+- Observado (no corregido, ajeno al RAG): `uvicorn --reload` en esta
+  maquina detecta cambios pero no termina de recargar (el proceso viejo
+  sigue sirviendo), tambien con SQLite y sin worker. Reiniciar a mano.
 
 
 ESTADO AL CIERRE DE ESTA SESION

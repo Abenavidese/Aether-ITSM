@@ -177,6 +177,7 @@ async def chat(
             "role": current_user.role, "user_id": current_user.id,
         },
         "diagnosis_report": None,
+        "sources": None,  # a previous turn's sources must not carry over
     }
     async with trace_scope(f"chat:{uuid.uuid4().hex}", "chat", current_user.company_id):
         async for _ in concierge_app.astream(initial_state, config=config):
@@ -184,8 +185,10 @@ async def chat(
 
     values = (await concierge_app.aget_state(config)).values
     reply = values.get("final_response", "")
+    # Only the passages the answer cites (validated, Fase 14.5) — never raw retrieval output.
+    sources = values.get("sources") or []
     if values.get("resolved", True):
-        return {"reply": reply, "status": "resolved"}
+        return {"reply": reply, "status": "resolved", "sources": sources}
 
     # Fase 5.3: the Concierge couldn't resolve it — create a real Ticket and
     # run it through the full swarm (via the queue), same as a webhook ticket.
@@ -202,6 +205,6 @@ async def chat(
     if external_id is None:
         return {
             "reply": f"{reply}\n\n(Your organization has reached its monthly ticket limit — please contact an admin.)",
-            "status": "resolved",
+            "status": "resolved", "sources": sources,
         }
-    return {"reply": reply, "status": "investigating", "ticket_external_id": external_id}
+    return {"reply": reply, "status": "investigating", "ticket_external_id": external_id, "sources": sources}

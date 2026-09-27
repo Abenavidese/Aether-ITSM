@@ -30,7 +30,8 @@ DO $$
 DECLARE
     t text;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['tickets', 'log_access_audit', 'platform_logs', 'knowledge_audit', 'agent_spans']
+    FOREACH t IN ARRAY ARRAY['tickets', 'log_access_audit', 'platform_logs', 'knowledge_audit', 'agent_spans',
+                             'knowledge_documents', 'knowledge_chunks', 'rag_queries']
     LOOP
         IF to_regclass('public.' || t) IS NOT NULL THEN
             EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);

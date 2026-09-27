@@ -25,8 +25,8 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Bumped whenever chunk content/format changes, and stored on every chunk, so
-# scripts/reindex_rag.py can find chunks produced by an older strategy.
-CHUNKER_VERSION = "section-v1"
+# `python -m src.rag.admin reindex` can find documents built by an older strategy.
+CHUNKER_VERSION = "section-v2"  # v2: PDF headings (src/rag/parsing.py)
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 150

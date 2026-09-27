@@ -19,6 +19,7 @@ from src.db import (
 from src.db.database import engine
 from src.db.migrate import upgrade_to_head
 from src.integrations.logs.router import router as log_drain_router
+from src.jobs.registry import build_worker
 from src.jobs.worker import WorkerDeps
 from src.observability.logging import RequestIdMiddleware, configure_logging
 from src.observability.router import router as observability_router
@@ -26,7 +27,6 @@ from src.rag.router import router as rag_router
 from src.security.limiter import limiter
 from src.tenant.router import router as tenant_router
 from src.tenant.user_router import router as user_router
-from src.tickets.jobs import build_worker
 
 settings = get_settings()
 

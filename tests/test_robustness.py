@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-from fakes import RecordingMCP, ScriptedLLM
+from fakes import RecordingMCP, ScriptedLLM, empty_retrieval
 from langgraph.checkpoint.memory import MemorySaver
 
 from src.agent.state import ClassificationResult, ConciergeResult, ExecutionPlanResult, PolicyCheckResult
@@ -293,8 +293,8 @@ def test_health_stays_fast_while_a_chat_waits_on_blocking_io(tenant, monkeypatch
 
     def slow_rag(*a, **kw):
         time.sleep(1.5)  # blocking, like an embedding call + pgvector round-trip
-        return ""
-    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", slow_rag)
+        return empty_retrieval()
+    monkeypatch.setattr("src.agent.concierge.node.retrieve", slow_rag)
     app.state.checkpointer = MemorySaver()
     app.state.mcp_client = RecordingMCP()
 
@@ -318,12 +318,13 @@ def test_health_stays_fast_while_a_chat_waits_on_blocking_io(tenant, monkeypatch
     assert seconds < 0.5, f"/health took {seconds:.2f}s while a chat turn was blocked on I/O"
 
 
-# ── the vector store is built once even when two threads ask at once ──────────
+# ── the retriever is built once even when two threads ask at once ─────────────
 
-def test_vector_store_singleton_survives_concurrent_first_use(monkeypatch):
-    # Found live (docker-compose, Postgres): the Concierge's two parallel RAG
-    # lookups both built a PGVector on the first chat, and the second crashed
-    # redefining langchain-postgres' tables -> 500.
+def test_retriever_singleton_survives_concurrent_first_use(monkeypatch):
+    # Found live (docker-compose, Postgres): the Concierge's parallel RAG
+    # lookups both built the store on the first chat, and the second crashed
+    # redefining the library's tables -> 500. The Fase 14 retriever keeps
+    # the same guarantee: one instance (and one reranker model load).
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -334,15 +335,15 @@ def test_vector_store_singleton_survives_concurrent_first_use(monkeypatch):
 
     def slow_build():
         builds.append(1)
-        time.sleep(0.2)  # connecting + reflecting tables takes a while
+        time.sleep(0.2)  # embedding client + reranker model load take a while
         return object()
 
-    monkeypatch.setattr(rag_service, "_vector_store", None)
-    monkeypatch.setattr(rag_service, "_build_vector_store", slow_build)
+    monkeypatch.setattr(rag_service, "_retriever", None)
+    monkeypatch.setattr(rag_service, "build_retriever", slow_build)
 
     def first_use():
         barrier.wait()
-        return rag_service.get_vector_store()
+        return rag_service.get_retriever()
 
     with ThreadPoolExecutor(2) as pool:
         a, b = pool.map(lambda _: first_use(), range(2))

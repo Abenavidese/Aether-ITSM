@@ -63,11 +63,17 @@ def build_system_prompt(turn: TurnContext, tool_catalog: str) -> str:
     the message says "[Imagen adjunta: no se pudo analizar ...]" ask the user
     to type the error text.
 
-    Company policy context:
-    {untrusted_block("company_policy", turn.policy_context) or "None found."}
+    Knowledge base passages (company policies and technical docs, numbered):
+    {untrusted_block("knowledge_base", turn.knowledge_context) or "None found."}
 
-    Technical documentation context:
-    {untrusted_block("technical_docs", turn.tech_context) or "None found."}
+    Citing the knowledge base: list in cited_passages the number of every
+    passage above your answer uses (e.g. [2] -> 2), and you may also put the
+    number in brackets right after the sentence, e.g. "Requires manager
+    approval [2]." Only numbers that appear above. If the passages don't
+    answer the question, say you couldn't find it in the company
+    documentation, leave cited_passages empty — never stretch an unrelated
+    passage into an answer. When a passage gives steps or values, include
+    them in your answer instead of offering to share them later.
     {_optional_section("Relevant code found in the company repository", "code_search", turn.code_context)}
     {_optional_section("Repository directory listing", "repo_tree", turn.directory_context)}
     {_optional_section("Real file contents (fetched from GitHub just now, with line numbers)", "repo_files", turn.file_context)}

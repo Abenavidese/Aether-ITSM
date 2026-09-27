@@ -86,7 +86,7 @@ The agent can read hosting-platform status and logs to tell whether a service is
 
 | Capability | Allowed? | Restriction Mechanism | Status |
 | :--- | :---: | :--- | :--- |
-| **Read Internal KB (RAG)** | ✅ Yes | `tenant_id` + `source_type` filter on every retrieval (`src/rag/service.py`). Postgres Row-Level Security for the same tables exists (`src/db/rls/`) but is off until the owner applies it (`DB_RLS_ENABLED`). | Implemented (RLS: Partial) |
+| **Read Internal KB (RAG)** | ✅ Yes | Every search runs in a tenant-scoped session: `tenant_id` filter in code **and** Postgres RLS on `knowledge_documents`/`knowledge_chunks` (`src/rag/store.py`, Fase 14.1). Admin corrections (`ai_feedback`) are searchable only after review. Retrieved text is fenced as untrusted data; answers only show sources that pass `src/rag/citations.py`. | Implemented |
 | **Execute Low/Med-Risk tool calls** | ✅ Yes | Live MCP registry + `tool_policy.authorize()`: risk ceiling, requester-bound identity, per-tool argument validation (§2.4). | Implemented |
 | **Health-check a URL** | ✅ Configured URLs only | Tenant's monitored services only; public addresses only; no redirects (§2.4-D). | Implemented |
 | **Execute High-Risk (Risk 3) actions** | ⚠️ Gated | Hard-paused (`interrupt_after`); only resumes via `POST /api/approve/{id}` (admin/superadmin, own tenant). | Implemented |

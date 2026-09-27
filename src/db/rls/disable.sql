@@ -6,6 +6,7 @@ DECLARE
     t text;
 BEGIN
     FOREACH t IN ARRAY ARRAY['tickets', 'log_access_audit', 'platform_logs', 'knowledge_audit', 'agent_spans',
+                             'knowledge_documents', 'knowledge_chunks', 'rag_queries',
                              'companies', 'users', 'langchain_pg_embedding']
     LOOP
         IF to_regclass('public.' || t) IS NOT NULL THEN

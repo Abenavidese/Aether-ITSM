@@ -37,8 +37,9 @@ async def _monitored_services(state: AgentState) -> list[dict]:
     return await asyncio.to_thread(get_monitored_services, tenant_id) if tenant_id else []
 
 
-async def _retrieve(tenant_id: str, query: str, source_type: str, top_k: int = 4) -> str:
-    # Embedding + pgvector search is blocking I/O: run it in a worker thread.
+async def _retrieve(tenant_id: str, query: str, source_type: str, top_k: int | None = None) -> str:
+    # Embedding + search + rerank is blocking I/O/CPU: run it in a worker thread.
+    # Numbered passages ([1]..[n]) with document/section (Fase 14.5).
     return await asyncio.to_thread(retrieve_context, tenant_id, query, source_type=source_type, top_k=top_k)
 
 

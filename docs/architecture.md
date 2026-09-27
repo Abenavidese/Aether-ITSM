@@ -148,6 +148,14 @@ Attached images never enter the graph as images: `src/agent/vision.py` reads the
 
 There is no `human_interrupt_node` as a separate graph node — the pause is `interrupt_after` on `draft_plan` itself, and no Nemotron-Ultra / deep-log-analysis step exists yet for `escalate`; it's the same "super" model doing what `policy`/`execution` do.
 
+### 4.3 Knowledge base (RAG) — Implemented (Fase 14)
+- **Ingest:** upload → validation (`ingest_guard.py`) → parsing (`parsing.py`: PDF headings by font size, tables as Markdown, scanned pages reported) → a new *version* of the document is registered and an `index_document` job queued in the same transaction. The worker chunks by section, redacts secrets, flags injection-like text, embeds in batches and flips the active version atomically; the previous version answers until then (`documents.py`).
+- **Store:** `knowledge_documents` / `knowledge_chunks` with `tenant_id` as a column, RLS on both, a dimensionless `vector` column with one partial HNSW index per embedding model (vectors of different models are never compared), and a GIN full-text index (`store.py`).
+- **Retrieve:** follow-up rewriting (`query.py`) → dense + BM25 + exact-identifier candidates → Reciprocal Rank Fusion → cross-encoder rerank (optional, `rerank.py`) → relevance gate → small-to-big merge → numbered passages (`retrieval.py`). The Concierge does one search over policies and technical docs; ticket nodes search their own source.
+- **Answer:** citations validated by code, plus evidence-based attribution (`citations.py`); the chat API returns only the sources the answer used.
+- **Observe:** a `retrieval` span per search (stage timings, chunk ids/scores) and a `rag_queries` row feeding the admin insights (`insights.py`).
+- **Measure:** `evals/rag` (74 queries, 2-tenant corpus); every default above was chosen with it — see `docs/PLAN_IMPLEMENTACION.txt`, Fase 14.
+
 ## 5. Security & Infrastructure Deployment
 
 ### 5.1 Nebius Token Factory Routing

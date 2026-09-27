@@ -1,10 +1,11 @@
 import uuid
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from .database import Base
+from .types import Embedding
 
 
 class SubscriptionPlan(Base):
@@ -227,3 +228,106 @@ class AgentSpan(Base):
     duration_ms = Column(Integer, nullable=False)
     status = Column(String, nullable=False, default="ok")    # ok | error
     started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    # Small JSON of step details (e.g. a retrieval's stage timings and chunk
+    # ids/scores, Fase 14.7). Same rule as the rest: never prompt text.
+    attributes = Column(Text, nullable=True)
+
+
+class KnowledgeDocument(Base):
+    """
+    One document of a tenant's knowledge base (Fase 14.1) — the registry the
+    old store never had (the file list used to be a DISTINCT over chunks).
+
+    Versioning: every upload with new content bumps latest_version and is
+    indexed by a queue job; chunks of the version being built are inactive
+    until the job flips them, so the previous version keeps answering until
+    the new one is ready. `content` is the extracted text of latest_version,
+    kept so a document can be re-indexed (new embedding model, new chunker)
+    without the original file.
+    """
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (UniqueConstraint("tenant_id", "filename", name="uq_knowledge_document_tenant_filename"),)
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    filename = Column(String, nullable=False)
+    source_type = Column(String, nullable=False)       # company_policy | technical_repo | ai_feedback
+    # queued | indexing | ready | failed | pending_review | rejected
+    status = Column(String, nullable=False, default="queued")
+    latest_version = Column(Integer, nullable=False, default=1)
+    active_version = Column(Integer, nullable=True)    # the version search serves; None until first ready
+    sha256 = Column(String, nullable=True)             # of latest_version's extracted text
+    content = Column(Text, nullable=True)
+    page_map = Column(Text, nullable=True)             # JSON [[char_offset, page], ...] of `content` (PDFs)
+    size_bytes = Column(Integer, nullable=True)
+    pages = Column(Integer, nullable=True)
+    chunk_count = Column(Integer, nullable=False, default=0)
+    embedding_model = Column(String, nullable=True)    # of the active version
+    embedding_dim = Column(Integer, nullable=True)
+    chunker_version = Column(String, nullable=True)
+    warnings = Column(Text, nullable=True)             # JSON list: scanned pages, injection flags...
+    error = Column(Text, nullable=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    reviewed_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    indexed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class KnowledgeChunk(Base):
+    """
+    A searchable passage (Fase 14.1). tenant_id is a real column (the old
+    store kept it inside JSON), so RLS can enforce it and every index can
+    lead with it. filename/source_type are copied from the document so a
+    search is one table scan with no join.
+
+    The embedding column has no fixed dimension: vectors of different models
+    coexist (never compared — every search filters by embedding_model), and
+    each model gets its own partial HNSW index over a cast to its dimension
+    (src/rag/store.py:ensure_vector_index).
+    """
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        Index("ix_knowledge_chunks_search", "tenant_id", "is_active", "source_type"),
+        Index("ix_knowledge_chunks_document", "document_id", "version"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("companies.id"), nullable=False)
+    document_id = Column(String, ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=False)
+    source_type = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    section = Column(String, nullable=True)
+    page = Column(Integer, nullable=True)
+    chunk_index = Column(Integer, nullable=False)
+    content = Column(Text, nullable=False)             # header + body, what the model reads
+    search_text = Column(Text, nullable=False)         # normalized for full-text search (src/rag/text.py)
+    embedding = Column(Embedding, nullable=True)
+    embedding_model = Column(String, nullable=True)
+    chunk_metadata = Column(Text, nullable=True)       # JSON: injection flags, feedback author/date
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RagQueryLog(Base):
+    """
+    One row per knowledge-base search (Fase 14.7): what was asked (redacted,
+    truncated), whether anything relevant came back, and which documents
+    answered. Admin-only, tenant-scoped (RLS). Feeds "documents never used"
+    and "questions with no answer" — i.e. what the company should document
+    next. Purged after rag_query_log_retention_days.
+    """
+    __tablename__ = "rag_queries"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    trace_id = Column(String, nullable=True)
+    origin = Column(String, nullable=False)            # chat | ticket
+    query = Column(String, nullable=False)
+    rewritten = Column(Boolean, nullable=False, default=False)
+    passages = Column(Integer, nullable=False, default=0)
+    top_score = Column(Float, nullable=True)
+    document_ids = Column(Text, nullable=True)         # JSON list of documents cited in the context
+    duration_ms = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

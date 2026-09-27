@@ -2,6 +2,7 @@ import json
 import os
 
 import pytest
+from fakes import empty_retrieval
 from fastapi.testclient import TestClient
 
 from src.db import models
@@ -156,11 +157,11 @@ def test_chat_resolved_in_one_turn(seeded_company, monkeypatch):
     # RAG needs a real Postgres+pgvector store (see docs/architecture.md) —
     # out of scope for this sqlite-backed suite; retrieve_context is
     # exercised for real by scripts/e2e_ollama.py against Supabase.
-    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
 
     response = client.post("/api/chat", json={"message": "my vpn is down"})
     assert response.status_code == 200
-    assert response.json() == {"reply": "Cleared your VPN session.", "status": "resolved"}
+    assert response.json() == {"reply": "Cleared your VPN session.", "status": "resolved", "sources": []}
 
 
 def test_chat_escalates_to_ticket(seeded_company, monkeypatch):
@@ -171,7 +172,7 @@ def test_chat_escalates_to_ticket(seeded_company, monkeypatch):
     monkeypatch.setattr(
         "src.agent.concierge.node.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
     )
-    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
 
     response = client.post("/api/chat", json={"message": "I need admin access to prod DB"})
     assert response.status_code == 200
@@ -340,7 +341,7 @@ def _setup_platform_logs(monkeypatch, company_id, result, suspended=False, http_
         return "\n".join(f"=== {f} (COMPLETE FILE, 1 lines) ===\n  11 | const id = req.user.id;" for f in files)
     monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", fake_tree)
     monkeypatch.setattr("src.agent.concierge.node._file_contents_context", fake_files)
-    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
 
     llm = _RecordingLLM(result)
     monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
@@ -562,7 +563,7 @@ def test_chat_diagnoses_a_vercel_service_from_drained_logs(seeded_company, monke
     async def no_tree(tenant_id):
         return []
     monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", no_tree)
-    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
     llm = _RecordingLLM(ConciergeResult(response_text="El carrito falla.", resolved=True))
     monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
 

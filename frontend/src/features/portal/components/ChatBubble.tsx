@@ -1,5 +1,13 @@
-import { Bot, User } from 'lucide-react';
+import { Bot, FileText, User } from 'lucide-react';
 import { TypingIndicator } from './TypingIndicator';
+
+// A knowledge-base passage the answer cites as [n] (validated server-side, Fase 14.5).
+interface Source {
+  n: number;
+  filename: string;
+  section: string | null;
+  page: number | null;
+}
 
 interface Message {
   id: string;
@@ -7,6 +15,25 @@ interface Message {
   text: string;
   image_url?: string;
   isThinking?: boolean;
+  sources?: Source[];
+}
+
+function SourceList({ sources }: { sources: Source[] }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-700/60">
+      {sources.map(s => (
+        <span
+          key={s.n}
+          title={[s.filename, s.section, s.page ? `p. ${s.page}` : null].filter(Boolean).join(' — ')}
+          className="inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-slate-900/70 border border-slate-700 text-[11px] text-slate-400"
+        >
+          <span className="text-indigo-400 font-medium">[{s.n}]</span>
+          <FileText size={11} className="shrink-0" />
+          <span className="truncate">{s.section ? `${s.filename} · ${s.section}` : s.filename}{s.page ? ` · p. ${s.page}` : ''}</span>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 interface ChatBubbleProps {
@@ -34,8 +61,9 @@ export function ChatBubble({ message }: ChatBubbleProps) {
         {message.isThinking ? (
           <TypingIndicator />
         ) : (
-          <p className="leading-relaxed text-sm">{message.text}</p>
+          <p className="leading-relaxed text-sm whitespace-pre-line">{message.text}</p>
         )}
+        {message.sources && message.sources.length > 0 && <SourceList sources={message.sources} />}
       </div>
 
       {message.sender === 'user' && (
@@ -47,4 +75,4 @@ export function ChatBubble({ message }: ChatBubbleProps) {
   );
 }
 
-export type { Message };
+export type { Message, Source };

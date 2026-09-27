@@ -1,0 +1,98 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R 9 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Length 1664 >>
+stream
+BT /F1 18 Tf 60 772 Td (Manual de impresoras de oficina - Andina Logistica) Tj ET
+BT /F1 15 Tf 60 730 Td (Impresoras por piso) Tj ET
+BT /F1 10 Tf 60 704 Td (Cada piso tiene una impresora multifuncion. Use la cola de su piso.) Tj ET
+BT /F1 10 Tf 60 688 Td (Las impresoras se agregan solas en equipos del dominio.) Tj ET
+60 672 m 540 672 l S
+BT /F1 10 Tf 65 658 Td (Piso) Tj ET
+BT /F1 10 Tf 115 658 Td (Modelo) Tj ET
+BT /F1 10 Tf 265 658 Td (Direccion IP) Tj ET
+BT /F1 10 Tf 375 658 Td (Cola) Tj ET
+60 652 m 540 652 l S
+BT /F1 10 Tf 65 638 Td (1) Tj ET
+BT /F1 10 Tf 115 638 Td (HP LaserJet M507) Tj ET
+BT /F1 10 Tf 265 638 Td (10.20.1.15) Tj ET
+BT /F1 10 Tf 375 638 Td (IMP-P1-RECEPCION) Tj ET
+60 632 m 540 632 l S
+BT /F1 10 Tf 65 618 Td (2) Tj ET
+BT /F1 10 Tf 115 618 Td (Ricoh IM C3000) Tj ET
+BT /F1 10 Tf 265 618 Td (10.20.2.15) Tj ET
+BT /F1 10 Tf 375 618 Td (IMP-P2-FINANZAS) Tj ET
+60 612 m 540 612 l S
+BT /F1 10 Tf 65 598 Td (3) Tj ET
+BT /F1 10 Tf 115 598 Td (Ricoh IM C3000) Tj ET
+BT /F1 10 Tf 265 598 Td (10.20.3.15) Tj ET
+BT /F1 10 Tf 375 598 Td (IMP-P3-OPERACIONES) Tj ET
+60 592 m 540 592 l S
+BT /F1 10 Tf 65 578 Td (4) Tj ET
+BT /F1 10 Tf 115 578 Td (HP LaserJet M507) Tj ET
+BT /F1 10 Tf 265 578 Td (10.20.4.15) Tj ET
+BT /F1 10 Tf 375 578 Td (IMP-P4-TECNOLOGIA) Tj ET
+60 572 m 540 572 l S
+60 672 m 60 572 l S
+110 672 m 110 572 l S
+260 672 m 260 572 l S
+370 672 m 370 572 l S
+540 672 m 540 572 l S
+BT /F1 15 Tf 60 540 Td (Codigos de error de las impresoras) Tj ET
+BT /F1 10 Tf 60 514 Td (E-05: atasco de papel en la bandeja 2. Abra la puerta lateral derecha) Tj ET
+BT /F1 10 Tf 60 498 Td (y retire el papel tirando hacia usted, sin girar los rodillos.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 737 >>
+stream
+BT /F1 10 Tf 60 772 Td (E-12: toner agotado. El toner de repuesto esta en el armario de cada piso;) Tj ET
+BT /F1 10 Tf 60 756 Td (si no hay, pida uno por ticket de categoria Hardware indicando el piso.) Tj ET
+BT /F1 10 Tf 60 740 Td (E-31: error de red. Verifique que el cable este conectado y que la IP) Tj ET
+BT /F1 10 Tf 60 724 Td (de la impresora responda. Si no responde, abra un ticket.) Tj ET
+BT /F1 15 Tf 60 686 Td (Impresion segura) Tj ET
+BT /F1 10 Tf 60 660 Td (Los documentos confidenciales se imprimen con retencion: el trabajo queda) Tj ET
+BT /F1 10 Tf 60 644 Td (en la impresora hasta que el usuario acerca su credencial al lector.) Tj ET
+BT /F1 10 Tf 60 628 Td (Los trabajos retenidos se borran solos a las 24 horas.) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 29 >>
+stream
+0.9 g 60 400 475 300 re f 0 g
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000001940 00000 n 
+0000002066 00000 n 
+0000002854 00000 n 
+0000002980 00000 n 
+0000003059 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+3185
+%%EOF

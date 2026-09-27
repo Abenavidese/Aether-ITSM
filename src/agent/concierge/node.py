@@ -17,6 +17,7 @@ other request (roadmap 2.1).
 """
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -39,8 +40,9 @@ from src.config import get_llms
 from src.integrations.logs.diagnosis import DOWN
 from src.integrations.logs.service import RAW_LOG_ROLES, diagnose_service, get_log_services
 from src.integrations.monitoring import get_monitored_services
-from src.observability.tracing import traced_node
-from src.rag.service import retrieve_context
+from src.observability.tracing import record_span, traced_node
+from src.rag.citations import validate_citations
+from src.rag.service import POLICY, TECHNICAL, retrieve
 from src.security.redaction import redact_code
 
 from .platform import (
@@ -94,10 +96,14 @@ async def _gather_context(state: ConciergeState, mcp_client: MCPToolClient) -> T
     if not tenant_id:
         return turn
 
-    turn.policy_context, turn.tech_context = await asyncio.gather(
-        asyncio.to_thread(retrieve_context, tenant_id, user_query, source_type="company_policy"),
-        asyncio.to_thread(retrieve_context, tenant_id, user_query, source_type="technical_repo"),
+    # One hybrid search over policies AND technical docs (Fase 14.4), with the
+    # user's previous messages so a follow-up ("¿y el de Admin?") searches
+    # for what it means, not for its literal words.
+    history = [message_text(m) for m in state["messages"][:-1] if isinstance(m, HumanMessage)][-3:]
+    turn.knowledge = await asyncio.to_thread(
+        retrieve, tenant_id, user_query, sources=[POLICY, TECHNICAL], history=history, origin="chat",
     )
+    turn.knowledge_context = turn.knowledge.to_prompt()
 
     wants_code = bool(_CODE_QUESTION_PATTERN.search(user_query))
     wants_directory = bool(_DIRECTORY_QUESTION_PATTERN.search(recent_text) or _extract_paths(user_query))
@@ -263,11 +269,17 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
         response_text = f"{response_text}\n\n{tool_text}"
 
     response_text, resolved = _apply_fixed_rules(response_text, result.resolved, turn)
+    passages = turn.knowledge.passages if turn.knowledge else []
+    citations = validate_citations(response_text, passages, declared=result.cited_passages, question=turn.user_query)
+    if citations.removed:
+        logger.warning("Concierge cited non-existent passages %s — removed", citations.removed)
+    record_span("citations", "concierge", 0, datetime.now(timezone.utc), attributes=citations.stats(len(passages)))
     return {
-        "messages": [AIMessage(content=response_text)],
+        "messages": [AIMessage(content=citations.text)],
         "resolved": resolved,
-        "final_response": response_text,
+        "final_response": citations.text,
         "diagnosis_report": "\n\n".join(d.for_ticket() for d in turn.diagnoses) or None,
+        "sources": citations.sources,
     }
 
 

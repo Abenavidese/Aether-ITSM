@@ -6,9 +6,10 @@ Accepted. Reviewed against the code on 2026-09-26 (roadmap 1.3):
   (`Secure` flag via `COOKIE_SECURE`, off by default for local http); tenant id and role in
   the claims; every tenant route resolves the user from the DB and scopes queries by
   `company_id`; ticket threads are namespaced by tenant.
-- **Partial:** "any database query is strictly scoped" relies on application filters.
-  Postgres Row-Level Security is written and tested (`src/db/rls/`, CI runs it) but only
-  enforced once the owner applies it (`DB_RLS_ENABLED=true`).
+- **Implemented (partial coverage):** tenant-scoped sessions are enforced twice:
+  application filters plus Postgres Row-Level Security (`src/db/rls/`, CI runs it), applied
+  to Supabase on 2026-09-26 (`DB_RLS_ENABLED=true`). Sessions without a tenant (login,
+  API-key lookup, job queue) and PGVector's own engine still rely on application filters.
 - **Superseded:** SQLite-only identity DB — Postgres (Supabase) is supported and the schema
   is managed by Alembic migrations; checkpoints live in Postgres too when configured.
 

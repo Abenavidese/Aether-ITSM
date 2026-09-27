@@ -30,5 +30,12 @@ check_untyped_defs = true
 warn_unused_ignores = true
 # Report errors only in the files below; imported modules are analysed but not (yet) held to it.
 follow_imports = "silent"
-# Typed core first (roadmap 1.4): the agent's decision code and the security layer.
-files = ["src/agent", "src/security"]
+# Typed core first (roadmap 1.4): the agent's decision code, the security layer
+# and the retrieval pipeline (Fase 14). The RAG modules that work on ORM rows
+# (documents, router, insights, admin) join once the models move to Mapped[] types.
+files = [
+    "src/agent", "src/security",
+    "src/rag/text.py", "src/rag/query.py", "src/rag/retrieval.py", "src/rag/rerank.py",
+    "src/rag/citations.py", "src/rag/parsing.py", "src/rag/store.py", "src/rag/service.py",
+    "src/rag/embeddings.py", "src/rag/chunking.py",
+]

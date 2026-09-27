@@ -1,0 +1,23 @@
+GLOSARIO DE SISTEMAS INTERNOS
+
+ERP Andina
+
+Sistema de planificación de recursos de la empresa (SAP Business One). Se
+usa para facturación, inventario de bodegas y compras. Los accesos al ERP
+se piden por ticket y los aprueba el jefe del área que usa el módulo.
+
+Portal de Software
+
+Aplicación de autoservicio del MDM donde cada empleado instala el software
+aprobado sin ayuda de la mesa de ayuda. Se abre desde el menú Inicio con
+el nombre "Company Portal".
+
+Bastión
+
+Servidor de salto con SSO por el que los ingenieros entran a los
+servidores de producción. Cada sesión queda grabada y se conserva 1 año.
+
+TMS
+
+Sistema de gestión de transporte que planifica las rutas de los camiones y
+calcula los tiempos de entrega. Se integra con el ERP cada 15 minutos.

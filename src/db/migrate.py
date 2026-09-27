@@ -25,11 +25,17 @@ BASELINE_REVISION = "0001"
 # LangGraph's Postgres checkpointer and langchain-postgres' pgvector store.
 # Neither autogenerate nor adoption may treat them as drift.
 EXTERNALLY_MANAGED_PREFIXES = ("checkpoint", "langchain_pg_")
+# Postgres-only indexes on knowledge_chunks that the models can't express:
+# full-text (migration 0003) and per-embedding-model HNSW (created at
+# runtime, src/rag/store.py). Not drift.
+POSTGRES_ONLY_INDEX_PREFIXES = ("ix_knowledge_chunks_fts", "ix_knowledge_chunks_hnsw_")
 
 
 def include_object(obj, name, type_, reflected, compare_to) -> bool:
     if type_ == "table" and reflected and compare_to is None:
         return not name.startswith(EXTERNALLY_MANAGED_PREFIXES)
+    if type_ == "index" and reflected and compare_to is None:
+        return not name.startswith(POSTGRES_ONLY_INDEX_PREFIXES)
     return True
 
 

@@ -1,6 +1,6 @@
 """Fixtures for the Fase 11 security suite (fakes live in tests/fakes.py)."""
 import pytest
-from fakes import RecordingMCP
+from fakes import RecordingMCP, empty_retrieval
 
 
 @pytest.fixture
@@ -10,8 +10,8 @@ def mcp():
 
 @pytest.fixture
 def no_rag(monkeypatch):
-    for target in ("src.agent.nodes.retrieve_context", "src.agent.concierge.node.retrieve_context"):
-        monkeypatch.setattr(target, lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.nodes.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
 
 
 @pytest.fixture

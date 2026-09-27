@@ -6,7 +6,7 @@ scripted model; the real-model run is `python -m evals.run`).
 import asyncio
 
 import pytest
-from fakes import RecordingMCP, ScriptedLLM
+from fakes import RecordingMCP, ScriptedLLM, empty_retrieval
 
 from evals.harness import EVAL_REQUESTER, load_cases, run_chat_case, run_ticket_case
 from evals.metrics import (
@@ -108,7 +108,7 @@ def test_harness_runs_the_real_ticket_graph(monkeypatch):
 def test_harness_runs_the_real_concierge(monkeypatch):
     llm = ScriptedLLM(ConciergeResult(response_text="Listo, reinicié el servidor.", resolved=True))
     monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
-    monkeypatch.setattr("src.agent.concierge.node.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
     monkeypatch.setattr("src.agent.concierge.node.get_monitored_services", lambda t: [])
     case = next(c for c in load_cases(DATASETS["concierge"]) if c["id"] == "cc-restart-es")
     result = asyncio.run(run_chat_case(case, RecordingMCP()))
