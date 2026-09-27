@@ -8,7 +8,6 @@ durable job queue (src/tickets/jobs.py) instead of in-process BackgroundTasks.
 """
 import asyncio
 import logging
-import re
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -16,12 +15,14 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.concierge import get_concierge_workflow
+from src.agent.vision import describe_attachment
 from src.config import get_settings
 from src.db.models import User
+from src.observability.tracing import trace_scope
 from src.security.deps import get_current_user
+from src.security.image_input import MAX_IMAGE_DATA_URI_CHARS, validate_image_data_uri
 from src.security.limiter import limiter, user_or_ip_key
 from src.tickets import service
-from src.observability.tracing import trace_scope
 from src.tickets.jobs import awaiting_approval, ticket_graph, ticket_thread_config, ticket_trace_id
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,8 @@ router = APIRouter()
 
 # Input limits (Fase 11.6): every field below ends up in an LLM prompt, a DB
 # row and possibly a GitHub issue — unbounded input is unbounded cost and a
-# way to push the system prompt out of the context window.
-_IMAGE_DATA_URI = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$")
-MAX_IMAGE_DATA_URI_CHARS = 7_000_000  # ~5 MB image
+# way to push the system prompt out of the context window. Images: inline
+# data URIs of a real png/jpeg/webp only (src/security/image_input.py).
 
 
 class TicketPayload(BaseModel):
@@ -44,13 +44,8 @@ class TicketPayload(BaseModel):
 
     @field_validator("image_base64")
     @classmethod
-    def _inline_image_only(cls, v):
-        # Only an inline image. A plain URL here would be fetched by whatever
-        # model provider receives it — i.e. an attacker-chosen URL requested
-        # on our behalf.
-        if v is not None and not _IMAGE_DATA_URI.fullmatch(v):
-            raise ValueError("image_base64 must be a data:image/(png|jpeg|webp);base64 URI")
-        return v
+    def _real_inline_image(cls, v):
+        return validate_image_data_uri(v)
 
 
 class ApprovalPayload(BaseModel):
@@ -60,6 +55,12 @@ class ApprovalPayload(BaseModel):
 
 class ChatPayload(BaseModel):
     message: str = Field(..., min_length=1, max_length=get_settings().chat_message_max_chars)
+    image_base64: str | None = Field(default=None, max_length=MAX_IMAGE_DATA_URI_CHARS)
+
+    @field_validator("image_base64")
+    @classmethod
+    def _real_inline_image(cls, v):
+        return validate_image_data_uri(v)
 
 
 @router.post("/webhook/ticket", status_code=202)
@@ -78,14 +79,14 @@ def receive_ticket_webhook(payload: TicketPayload, request: Request, x_api_key: 
             payload.image_base64,
         )
     except service.InvalidApiKey:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
+        raise HTTPException(status_code=401, detail="Invalid API Key") from None
     except service.UnknownEmployee as e:
         raise HTTPException(status_code=404, detail=(
             f"No Aether account found for '{e.email}' in this company. "
             "Add them under Settings > Users before creating tickets on their behalf."
-        ))
+        )) from e
     except service.TicketLimitReached as e:
-        raise HTTPException(status_code=402, detail=f"Monthly ticket limit reached for your plan ({e.limit}).")
+        raise HTTPException(status_code=402, detail=f"Monthly ticket limit reached for your plan ({e.limit}).") from e
 
     if accepted.duplicate:
         message = "Ticket already received; not reprocessing."
@@ -135,7 +136,7 @@ async def approve_ticket(
                 pass
     except Exception as e:
         logger.error("Resumption failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during resumption.")
+        raise HTTPException(status_code=500, detail="Internal server error during resumption.") from e
 
     final = await app.aget_state(config)
     await asyncio.to_thread(service.apply_graph_outcome, current_user.company_id, ticket_id,
@@ -163,8 +164,12 @@ async def chat(
     config = {"configurable": {"thread_id": f"chat:{current_user.id}", "mcp_client": request.app.state.mcp_client}}
     concierge_app = get_concierge_workflow().compile(checkpointer=request.app.state.checkpointer)
 
+    # An attached screenshot is read once by the vision model and travels as
+    # text (src/agent/vision.py): the chat model is text-only, and the
+    # multi-MB image never enters the checkpointed history.
+    message_text = await describe_attachment(payload.message, payload.image_base64)
     initial_state = {
-        "messages": [HumanMessage(content=payload.message)],
+        "messages": [HumanMessage(content=message_text)],
         "user_context": {
             "email": current_user.email, "tenant_id": current_user.company_id,
             # role gates raw platform-log lines (Fase 10.6); user_id is
@@ -184,12 +189,12 @@ async def chat(
 
     # Fase 5.3: the Concierge couldn't resolve it — create a real Ticket and
     # run it through the full swarm (via the queue), same as a webhook ticket.
-    description = payload.message
+    description = message_text
     if values.get("diagnosis_report"):
         # Evidence travels with the ticket, so the engineer (and the GitHub
         # issue built from this description on escalation) starts from the
         # real verdict and failing code location, not just "it's broken".
-        description = f"{payload.message}\n\n--- Diagnóstico automático (Aether) ---\n{values['diagnosis_report']}"
+        description = f"{message_text}\n\n--- Diagnóstico automático (Aether) ---\n{values['diagnosis_report']}"
     external_id = await asyncio.to_thread(
         service.open_chat_ticket, current_user.id, f"chat-{uuid.uuid4().hex[:10]}",
         payload.message[:120], description,

@@ -1,22 +1,24 @@
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
+
 from src.observability.tracing import traced_node
 
+from .nodes import draft_plan_node, escalate_node, execution_agent_node, policy_agent_node, supervisor_node
 from .state import AgentState
-from .nodes import supervisor_node, policy_agent_node, execution_agent_node, draft_plan_node, escalate_node
+
 
 def route_from_supervisor(state: AgentState) -> str:
     """Conditional Edge logic routing from Supervisor to specific sub-agents."""
     if state.get("technical_error"):
         return "escalate"
-    
-    return state.get("next_agent", "escalate")
+
+    return state.get("next_agent") or "escalate"
 
 def route_from_policy(state: AgentState) -> str:
     """Conditional Edge logic routing from Policy Agent to resolution."""
     if state.get("technical_error"):
         return "escalate"
 
-    return state.get("next_agent", "escalate")
+    return state.get("next_agent") or "escalate"
 
 def route_from_execution(state: AgentState) -> str:
     """Conditional Edge logic routing from Execution Agent.
@@ -56,7 +58,7 @@ def route_from_draft_plan(state: AgentState) -> str:
 def get_workflow() -> StateGraph:
     """Builds and returns the uncompiled StateGraph for Aether ITSM Multi-Agent Swarm."""
     workflow = StateGraph(AgentState)
-    
+
     # Add Async Swarm Nodes
     # Each node is timed into the run's trace (src/observability/tracing.py).
     for name, node in (
@@ -64,10 +66,10 @@ def get_workflow() -> StateGraph:
         ("draft_plan", draft_plan_node), ("escalate", escalate_node),
     ):
         workflow.add_node(name, traced_node(name, node))
-    
+
     # START -> Supervisor
     workflow.add_edge(START, "supervisor")
-    
+
     # Routing from Supervisor
     workflow.add_conditional_edges(
         "supervisor",
@@ -78,7 +80,7 @@ def get_workflow() -> StateGraph:
             "escalate": "escalate"
         }
     )
-    
+
     # Routing from Policy Agent
     workflow.add_conditional_edges(
         "policy",
@@ -89,7 +91,7 @@ def get_workflow() -> StateGraph:
             "escalate": "escalate"
         }
     )
-    
+
     # Routing from Execution Agent (may fail and need to escalate instead of ending)
     workflow.add_conditional_edges(
         "execution",
@@ -113,5 +115,5 @@ def get_workflow() -> StateGraph:
 
     # Terminal nodes
     workflow.add_edge("escalate", END)
-    
+
     return workflow

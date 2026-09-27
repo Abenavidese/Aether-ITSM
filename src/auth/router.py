@@ -1,13 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
-from src.db.database import get_db
-from src.db.models import User
+
 from src.auth import schemas, service
 from src.auth.exceptions import EmailAlreadyRegistered, InvalidCredentials
-from src.security.jwt import create_access_token
+from src.db.database import get_db
+from src.db.models import User
+from src.security.cookies import clear_auth_cookie, set_auth_cookie
 from src.security.deps import get_current_user
+from src.security.jwt import create_access_token
 from src.security.limiter import limiter
-from src.security.cookies import set_auth_cookie, clear_auth_cookie
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -17,7 +18,7 @@ def register(request: Request, user: schemas.UserCreate, db: Session = Depends(g
     try:
         return service.create_tenant_and_user(db, user)
     except EmailAlreadyRegistered:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is already registered.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is already registered.") from None
 
 @router.post("/login")
 @limiter.limit("5/minute")
@@ -25,8 +26,8 @@ def login(request: Request, user_credentials: schemas.UserLogin, response: Respo
     try:
         user = service.authenticate_user(db, user_credentials.email, user_credentials.password)
     except InvalidCredentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-        
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials") from None
+
     # Inject Tenant Context into JWT
     token_data = {
         "sub": user.id,
@@ -35,7 +36,7 @@ def login(request: Request, user_credentials: schemas.UserLogin, response: Respo
         "tenant_id": user.company_id,
         "onboarding_completed": user.company.onboarding_completed
     }
-    
+
     access_token = create_access_token(data=token_data)
     set_auth_cookie(response, access_token)
 

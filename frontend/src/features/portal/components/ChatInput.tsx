@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Send, Paperclip, X } from 'lucide-react';
 
 interface ChatInputProps {
@@ -9,11 +9,27 @@ interface ChatInputProps {
   onSubmit: (e: React.FormEvent) => void;
 }
 
+// Same limits the API enforces (src/security/image_input.py) — checked here
+// too so the user learns before uploading several MB for nothing.
+const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 export function ChatInput({ value, image, onChange, onImageChange, onSubmit }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = ''; // picking the same file again must fire onChange
+    setImageError(null);
+    if (file && !ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      setImageError('Only PNG, JPEG or WebP images are supported.');
+      return;
+    }
+    if (file && file.size > MAX_IMAGE_BYTES) {
+      setImageError('The image is larger than 5 MB.');
+      return;
+    }
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -36,6 +52,7 @@ export function ChatInput({ value, image, onChange, onImageChange, onSubmit }: C
           </button>
         </div>
       )}
+      {imageError && <p className="mb-2 text-xs text-rose-400">{imageError}</p>}
       <form onSubmit={onSubmit} className="relative flex items-center">
         <button 
           type="button" 
@@ -47,7 +64,7 @@ export function ChatInput({ value, image, onChange, onImageChange, onSubmit }: C
         <input 
           type="file" 
           ref={fileInputRef} 
-          accept="image/*" 
+          accept={ACCEPTED_IMAGE_TYPES.join(',')} 
           className="hidden" 
           onChange={handleFileChange} 
         />

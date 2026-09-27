@@ -1,5 +1,6 @@
 import operator
-from typing import Annotated, Literal, Sequence, TypedDict, Optional
+from typing import Annotated, Literal, Optional, Sequence, TypedDict
+
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
@@ -67,12 +68,12 @@ class AgentState(TypedDict):
     """The state passed between nodes in the LangGraph state machine."""
     # The history of the conversation, using operator.add to append new messages
     messages: Annotated[Sequence[BaseMessage], operator.add]
-    
+
     # Core ticket metadata
     ticket_id: str
     company_id: str
     user_context: dict
-    
+
     # State tracking variables populated by nodes
     assessed_risk: int
     intent: str
@@ -90,7 +91,7 @@ class AgentState(TypedDict):
     risk_rerouted: Optional[bool]
     final_resolution: Optional[str]
     technical_error: bool
-    
+
     # Swarm/Hierarchical Routing Fields
     next_agent: Optional[str]
     compliance_passed: Optional[bool]

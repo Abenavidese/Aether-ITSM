@@ -25,8 +25,8 @@ def _get_github_config(tenant_id: str) -> tuple[str, str] | None:
         company = db.query(Company).filter(Company.id == tenant_id).first()
         if not company or not company.github_token or not company.github_repo:
             return None
-        token = decrypt_token(company.github_token)
-        return (company.github_repo, token) if token else None
+        token = decrypt_token(str(company.github_token))
+        return (str(company.github_repo), token) if token else None
     finally:
         db.close()
 

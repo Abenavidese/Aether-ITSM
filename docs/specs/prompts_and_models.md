@@ -1,65 +1,56 @@
 # Model Prompting & Configuration Guide
 
-## 1. Inference Engine Configuration
-- **Inference Endpoint:** Nebius Token Factory (`https://api.studio.nebius.ai/v1/`)
-- **Embeddings Model:** `BAAI/bge-m3` or `nvidia/nv-embedqa-e5-v5` (via Nebius API) for Knowledge Base RAG.
-- **Default Temperature:** `0.0` (Strict determinism for all routing and execution).
-- **Format:** JSON Mode enabled via OpenAI SDK.
+> **Status** (reviewed against the code on 2026-09-26, roadmap 1.3). The prompts that
+> actually run live in the code (`src/agent/nodes.py`, `src/agent/concierge/prompt.py`,
+> `src/agent/vision.py`); this doc describes their contract, not a copy of them. The
+> Nemotron-3 model sizes and the Ultra/Summarizer nodes of the original draft were never
+> built — marked below.
 
-## 2. Classification Node (Nemotron 3 Nano 30B)
-**Purpose:** Speed and structured extraction.
-**System Prompt:**
-```text
-You are the Classification Engine for Aether ITSM.
-Analyze the user's IT support ticket.
-You must output ONLY a JSON object conforming strictly to the following schema:
-{
-  "intent": "string (e.g., 'vpn_reset', 'software_install')",
-  "risk_level": "integer (0-4)",
-  "tools_required": ["tool_name_1", "tool_name_2"]
-}
-If the request is ambiguous, output risk_level: 4.
-```
+## 1. Inference configuration — Implemented
 
-## 3. Planning & Execution Node (Nemotron 3 Super 120B)
-**Purpose:** Deep context window handling, robust tool selection.
-**System Prompt:**
-```text
-You are the Execution Engine for Aether ITSM.
-You have been given a ticket classified with Risk Level {risk_level}.
-Your goal is to resolve this ticket using the provided MCP tools.
-If Risk Level is <= 2, formulate the exact parameters needed for the tool and output them.
-If Risk Level == 3, DO NOT EXECUTE. Instead, output a human-readable 'proposed_plan' detailing exactly what you intend to do.
-Output JSON format:
-{
-  "tool_call": {"name": "tool_name", "parameters": {...}},
-  "proposed_plan": "string (only if Risk Level 3)",
-  "resolution_summary": "string"
-}
-```
+Every model id lives in `src/config.py`; switching provider is a `.env` change.
 
-## 4. Analysis Node (Nemotron 3 Ultra 550B)
-**Purpose:** Escalation handling. Only called on Risk Level 4.
-**System Prompt:**
-```
+| Role | Used by | Local (Ollama, default) | Hosted (`USE_OLLAMA=False`) |
+| :-- | :-- | :-- | :-- |
+| nano | Supervisor (risk classification) | `llama3.2:1b` | `NEBIUS_MODEL_NANO` (placeholder id) |
+| super | Policy, Execution, Draft Plan, Concierge chat | `llama3.1:8b` | `NEBIUS_MODEL_SUPER` (placeholder id) |
+| vision | Reads attached screenshots into text | `qwen2.5vl:3b` | `NEBIUS_MODEL_VISION` (placeholder id) |
+| embeddings | RAG | `nomic-embed-text` (with task prefixes) | `NEBIUS_EMBEDDING_MODEL` |
 
-## 5. Summarizer Node (Nemotron 3 Nano 30B)
-**Purpose:** Compress long ticket histories to manage context window limits and Nebius API costs.
-**System Prompt:**
-```text
-You are the Context Compression Engine for Aether ITSM.
-The provided ticket history exceeds the token limit (2000 tokens).
-Your task is to summarize the entire conversation into a concise technical brief.
-Preserve ALL error codes, usernames, IP addresses, and timestamps.
-Discard polite filler and unrelated chatter.
-Output JSON format:
-{
-  "compressed_context": "string (the highly dense summary)"
-}
-```text
-You are the Senior Analyst Engine for Aether ITSM.
-This ticket has been escalated to Tier 3.
-Analyze the provided ticket history and logs.
-Do NOT attempt to use tools to resolve this.
-Summarize the core technical issue, correlate any relevant error codes, and suggest 3 troubleshooting steps for the human engineer.
-```
+- Hosted: Nebius Token Factory (`https://api.studio.nebius.ai/v1/`) through the OpenAI SDK,
+  or OpenAI as a fallback. The Nebius model ids are placeholders until checked against the
+  real catalog (**Planned**: a live run on Nebius).
+- `temperature=0.0`; hard limits on every call: `LLM_MAX_OUTPUT_TOKENS` (1024), timeout
+  (120 s), Ollama `num_ctx` (8192) — added after a runaway generation froze the chat.
+- Structured output: `with_structured_output(<Pydantic schema>)` with bounded
+  self-correction (`src/agent/structured_output.py`), not a raw "JSON mode" flag.
+- The admin sees the active models read-only in Settings; they are platform configuration,
+  not a per-tenant choice (the old per-tenant "LLM engine" field did nothing and was removed).
+
+## 2. Classification — Supervisor (nano) — Implemented
+Output schema `ClassificationResult`: `intent`, `risk_level` (0-4, a `Literal`, so
+out-of-range values fail validation), `tools_required`. The model's risk is only a starting
+point: `enforce_risk_floor()` (EN + ES patterns) and the risk of `tools_required` can raise
+it, never lower it. A few-shot block was added after the first real eval run.
+
+## 3. Policy / Execution / Draft Plan (super) — Implemented
+- Policy: `PolicyCheckResult` (`is_compliant`, `reason`) against the tenant's
+  `company_policy` RAG documents.
+- Execution / Draft Plan: `ExecutionPlanResult` (`resolution_summary`, `proposed_plan`,
+  `tool_name`, `tool_args`). The model proposes; `tool_policy.authorize()` decides. For risk
+  3 the validated call is frozen into the plan and runs only after human approval.
+- Every text the model reads from outside (RAG chunks, repo files, logs, tool output,
+  screenshot readings) is fenced as `<untrusted_data>` with a data-not-instructions rule.
+
+## 4. Vision (screenshot reading) — Implemented
+One call per attached image: visible error text verbatim + a 1-3 sentence description,
+redacted, capped at `VISION_MAX_CHARS`, fenced as untrusted data. See `src/agent/vision.py`.
+
+## 5. Analysis node (Nemotron Ultra) — Planned, not built
+Escalations use the same "super" model; there is no Ultra model or separate analysis node.
+Escalation summaries plus the automatic diagnosis (platform logs → `file:line`) go into the
+GitHub issue.
+
+## 6. Summarizer node — Not built (superseded)
+History is kept inside the context window by `src/agent/context_budget.py` (newest turns
+first, system prompt always kept) instead of an LLM summarizer. See ADR-004 §4.

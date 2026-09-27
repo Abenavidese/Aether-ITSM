@@ -2,6 +2,21 @@
 **Project Name:** Aether ITSM  
 **Hackathon Target:** Nebius x NVIDIA Global AI Hackathon (Best Apps & Agents Track)
 
+> **Implementation status** (reviewed against the code on 2026-09-26, roadmap 1.3). This is
+> the product vision; the technical claims below map to reality as follows.
+>
+> | Claim in this document | Status |
+> | :-- | :-- |
+> | Autonomy Cascade: risk 0-4, deterministic routing, human gate at 3, analyst mode at 4 | **Implemented** — risk floors and per-tool policy in code; the model's classification can only be raised. |
+> | MCP for controlled tools | **Implemented** protocol; tool backends **simulated** except service health checks. |
+> | NVIDIA OpenShell kernel-level sandbox | **Planned** — tools run in a plain subprocess. |
+> | Nemotron 3 Nano/Super/Ultra on Nebius Token Factory | **Planned** — runs on local Ollama models today; Nebius ids are placeholders; no Ultra role. |
+> | Nebius Serverless Endpoints / Jobs hosting | **Planned** — Docker Compose locally; background work uses Aether's own job queue. |
+> | ServiceNow / Jira integration | **Partial** — inbound webhook only; no calls back into the ITSM. |
+> | Multi-tenant SaaS, plans, admin panel | **Implemented**; per-client policy configuration **Planned**. |
+> | Dashboards: deflection, MTTR, guardrail audit | **Partial** — token/cost and latency per node, log-access and knowledge audits; deflection/MTTR not measured. |
+> | Market figures (§2) | Third-party estimates quoted for context, not measured by this project. |
+
 ---
 
 ## 1. Executive Summary

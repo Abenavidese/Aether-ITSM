@@ -3,6 +3,18 @@
 ## 1. Introduction
 This document defines the technical architecture, component interactions, and data flows for Aether ITSM. It serves as the blueprint for development, ensuring all engineering efforts align with the "Autonomy Cascade" security model and utilize the Nebius Token Factory ecosystem effectively.
 
+> **Implementation status** (reviewed against the code on 2026-09-26, roadmap 1.3). The
+> diagrams in §2-§3 are the *target* design. What differs today:
+> - **Implemented:** FastAPI webhook (202) → durable job queue in the same database
+>   (`src/jobs/`, not `BackgroundTasks`) → LangGraph graph (§4) with a checkpointer that is
+>   Postgres or SQLite (`src/agent/checkpointer.py`); MCP tools over stdio; employee chat
+>   (Concierge) with RAG, repo reading, read-only platform logs and screenshot reading by a
+>   vision model; GitHub issues on escalation; Alembic migrations; Docker Compose stack.
+> - **Planned:** ITSM API calls back into Jira/ServiceNow (comment, resolve, approve there);
+>   NVIDIA OpenShell sandbox; hosting on Nebius Serverless; Nemotron-3 Nano/Super/Ultra ids
+>   (the configured Nebius ids are placeholders and there is no Ultra role).
+> - **Simulated:** the VPN/MDM/IAM/knowledge MCP tool backends (canned results).
+
 ## 2. High-Level System Architecture
 
 Aether operates as an intelligent middleware layer between the ITSM Platform (e.g., ServiceNow/Jira) and the organization's infrastructure.
@@ -111,7 +123,7 @@ sequenceDiagram
 
 ## 4. LangGraph Node Specification
 
-To achieve deterministic routing, we use LangGraph. The agent's memory (Thread State) is passed sequentially between nodes and persisted using `SqliteSaver` to survive server restarts during Human-in-the-Loop pauses.
+To achieve deterministic routing, we use LangGraph. The agent's memory (Thread State) is passed sequentially between nodes and persisted by the checkpointer (`AsyncPostgresSaver` when `DATABASE_URL` is Postgres, `AsyncSqliteSaver` otherwise) to survive server restarts during Human-in-the-Loop pauses. Ticket runs are queue jobs: a worker that dies mid-run is detected by heartbeat and the run resumes from the last completed node.
 
 ### 4.1 State Definition (Python / Pydantic)
 ```python
@@ -130,7 +142,9 @@ Implemented node names (`src/agent/nodes.py`, `src/agent/graph.py`) differ sligh
 2.  **`policy` node:** Reached for Risk 1-3. Calls the "super" model against the tenant's `company_policy` RAG documents to decide `is_compliant`. Routes to `execution` (Risk 0-2, compliant), `draft_plan` (Risk 3, compliant), or `escalate` (non-compliant).
 3.  **`execution` node:** Reached for Risk 0-2, or after a Risk 3 plan is approved. Calls the "super" model against `technical_repo`/`ai_feedback` RAG, and dispatches a real tool call through the MCP client (`src/agent/mcp_client.py`) when `tool_name` is set in its structured output — never free-form code, never a narrated-only "as if" execution.
 4.  **`draft_plan` node:** Reached for Risk 3 (compliant). Drafts `proposed_plan` and the graph pauses (`interrupt_after=["draft_plan"]`) until `POST /api/approve/{ticket_id}` resumes it. On approval it proceeds to `execution` with the approved plan in context; on rejection it routes to `escalate` instead of dead-ending.
-5.  **`escalate` node:** Reached for Risk 4, non-compliant requests, a rejected plan, or any node-level technical failure. Produces the escalation summary; the orchestration layer (`src/api/routes.py`, not the graph itself) then creates a GitHub Issue for the engineering team if the tenant has GitHub configured (`src/integrations/github.py`) and records the link on the ticket.
+5.  **`escalate` node:** Reached for Risk 4, non-compliant requests, a rejected plan, or any node-level technical failure. Produces the escalation summary; the orchestration layer (not the graph itself) then enqueues a `create_github_issue` job (`src/tickets/jobs.py`) that opens a GitHub Issue for the engineering team if the tenant has GitHub configured (`src/integrations/github.py`), with retries, and records the link on the ticket.
+
+Attached images never enter the graph as images: `src/agent/vision.py` reads them into text before the first node (webhook tickets and chat alike), so every node and every deterministic check works on plain text.
 
 There is no `human_interrupt_node` as a separate graph node — the pause is `interrupt_after` on `draft_plan` itself, and no Nemotron-Ultra / deep-log-analysis step exists yet for `escalate`; it's the same "super" model doing what `policy`/`execution` do.
 

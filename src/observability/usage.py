@@ -11,8 +11,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from src.config import get_settings
-from src.db.tenant_scope import tenant_session
 from src.db.models import AgentSpan
+from src.db.tenant_scope import tenant_session
 
 logger = logging.getLogger(__name__)
 

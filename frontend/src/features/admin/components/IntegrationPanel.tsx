@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { KeyRound, Webhook, Link2, Copy, CheckCircle2, GitBranch, Loader2, Activity, Plus, Trash2, Eye, EyeOff, ScrollText, ShieldCheck } from 'lucide-react';
+import { KeyRound, Link2, Copy, CheckCircle2, GitBranch, Loader2, Activity, Plus, Trash2, Eye, EyeOff, ScrollText, ShieldCheck } from 'lucide-react';
 import { config } from '../../../config';
 
 type LogProvider = 'render' | 'vercel';
@@ -615,24 +615,6 @@ export function IntegrationPanel() {
             )}
           </div>
         </div>
-
-        {/* WEBHOOK SECTION */}
-        <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Webhook className="text-cyan-400" size={20} />
-            <h3 className="text-lg font-medium text-white">Resolution Webhook</h3>
-          </div>
-          <p className="text-sm text-slate-400 mb-4">
-            Aether will send HTTP POST requests to this URL when an autonomous action succeeds or fails.
-          </p>
-          <input 
-            type="text" 
-            readOnly 
-            value={settings.webhook_url || 'Not configured'} 
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-300 text-sm focus:outline-none opacity-80"
-          />
-        </div>
-        
       </div>
     </div>
   );

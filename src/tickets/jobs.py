@@ -17,6 +17,7 @@ import logging
 from langchain_core.messages import HumanMessage
 
 from src.agent.graph import get_workflow
+from src.agent.vision import describe_attachment
 from src.config import Settings
 from src.integrations.github import create_issue
 from src.jobs.queue import JobKind
@@ -54,14 +55,13 @@ def awaiting_approval(snapshot) -> bool:
     return bool(snapshot.next) and values.get("proposed_plan") is not None and values.get("human_approved") is None
 
 
-def _initial_state(run: TicketRun, image_base64: str | None) -> dict:
-    text = f"Title: {run.title}\n\nDescription: {run.description}"
-    content = (
-        [{"type": "text", "text": text}, {"type": "image_url", "image_url": {"url": image_base64}}]
-        if image_base64 else text
-    )
+async def _initial_state(run: TicketRun, image_base64: str | None) -> dict:
+    # The attached image is read by the vision model and joins the ticket as
+    # text: every node (risk floor, RAG, policy) works on a plain string, and
+    # the text-only models never get an image part they can't see.
+    text = await describe_attachment(f"Title: {run.title}\n\nDescription: {run.description}", image_base64)
     return {
-        "messages": [HumanMessage(content=content)],
+        "messages": [HumanMessage(content=text)],
         "ticket_id": run.external_id,
         "company_id": run.tenant_id,
         "user_context": {"email": run.requester_email, "tenant_id": run.tenant_id},
@@ -82,7 +82,7 @@ async def run_ticket(payload: dict, deps: WorkerDeps) -> None:
     snapshot = await app.aget_state(config)
 
     if not snapshot.values:
-        graph_input = _initial_state(run, payload.get("image_base64"))
+        graph_input = await _initial_state(run, payload.get("image_base64"))
     elif snapshot.next and not awaiting_approval(snapshot):
         logger.warning("Resuming interrupted agent run for ticket %s from its last checkpoint", run.external_id)
         graph_input = None

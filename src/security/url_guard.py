@@ -29,7 +29,7 @@ class UnsafeURLError(ValueError):
 _ALLOWED_SCHEMES = {"http", "https"}
 
 
-def _is_allowed_ip(ip: ipaddress._BaseAddress, allow_private: bool) -> bool:
+def _is_allowed_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address, allow_private: bool) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
         ip = ip.ipv4_mapped
     if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
@@ -42,7 +42,7 @@ def _is_allowed_ip(ip: ipaddress._BaseAddress, allow_private: bool) -> bool:
 def resolve_host(host: str) -> list[str]:
     """All addresses `host` resolves to (separate function so tests can stub DNS)."""
     infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    return sorted({info[4][0] for info in infos})
+    return sorted({str(info[4][0]) for info in infos})
 
 
 def validate_outbound_url(url: str, *, allow_private: bool = False) -> str:

@@ -1,8 +1,11 @@
 import json
 import logging
+
 import httpx
+
 # mcp>=2.0 renamed FastMCP -> MCPServer (same decorator-based API otherwise).
 from mcp.server.mcpserver import MCPServer
+
 from src.config import get_settings
 from src.security.url_guard import UnsafeURLError, validate_outbound_url
 
@@ -39,13 +42,13 @@ def provision_standard_software(user_id: str, software_id: str) -> str:
     logger.info("Provisioning %s", software_id)
     settings = get_settings()
     whitelist = settings.get_mdm_whitelist_list
-    
+
     if software_id not in whitelist:
         return json.dumps({
             "status": "error",
             "message": f"Software {software_id} is not in the standard whitelist. Manual approval required."
         })
-        
+
     return json.dumps({
         "status": "success",
         "action": "mdm_group_added",

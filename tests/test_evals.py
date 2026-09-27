@@ -10,7 +10,12 @@ from fakes import RecordingMCP, ScriptedLLM
 
 from evals.harness import EVAL_REQUESTER, load_cases, run_chat_case, run_ticket_case
 from evals.metrics import (
-    ChatResult, TicketResult, chat_checks, check_thresholds, summarize_chats, summarize_tickets,
+    ChatResult,
+    TicketResult,
+    chat_checks,
+    check_thresholds,
+    summarize_chats,
+    summarize_tickets,
 )
 from evals.run import DATASETS, render_markdown
 from src.agent.state import ClassificationResult, ConciergeResult, ExecutionPlanResult, PolicyCheckResult

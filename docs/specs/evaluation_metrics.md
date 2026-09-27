@@ -1,33 +1,54 @@
-# Evaluation & Metrics Plan (Hackathon MVP)
+# Evaluation & Metrics Plan
+
+> **Status legend** — **Implemented**: exists in code and is exercised by tests or a
+> real run. **Partial**: exists, with the gap stated. **Planned**: not built yet.
+> Reviewed against the code on 2026-09-26 (roadmap 1.3); the original hackathon plan
+> promised several things that were never built, marked below.
 
 ## 1. Key Performance Indicators (KPIs)
-To demonstrate business value to the hackathon judges, we will track and present the following metrics:
-1. **L1 Deflection Rate (Simulated):** Target 100% resolution on Level 2 test flows.
-2. **Mean Time To Resolution (MTTR):** Target < 30 seconds for Auto-Resolve flows (compared to an assumed 15-minute human benchmark).
-3. **Token Efficiency:** Track the ratio of tokens sent to Nano vs Super vs Ultra. Target > 80% usage on Nano/Super to prove cost-effectiveness.
 
-## 2. Test Dataset (Synthetic Tickets)
-We will generate a dataset of 30 synthetic tickets stored in `tests/data/tickets.json`.
-- **10x Level 1/2 Tickets:** "My VPN is stuck", "I need Docker installed".
-- **10x Level 3 Tickets:** "Please grant me AWS Admin access for project X".
-- **10x Level 4 Tickets:** "The production database is throwing OOM errors".
+| KPI | Status | Reality |
+| :-- | :-- | :-- |
+| L1 deflection rate | **Partial** | The eval harness measures routing (`auto` vs `approval` vs `escalate`) per case; there is no production deflection metric yet. The dashboard's "time/cost saved" is a fixed placeholder per auto-resolved ticket (plan item 8.4). |
+| MTTR < 30 s for auto-resolve | **Partial** | Per-node latency (p50/p95) is recorded in `agent_spans` and served by `GET /tenant/observability/usage`. No MTTR target is enforced or reported. |
+| Token efficiency (share of tokens per model) | **Implemented** | Tokens and cost per model id from `agent_spans` (`src/observability/usage.py`), priced with `LLM_PRICES_JSON`. There is no "Ultra" model: two roles (nano/super) plus the vision model. |
 
-**Concurrency Mitigation (SQLite):** To avoid database locking issues with `SqliteSaver` during the live demo, the test script will inject the tickets into the FastAPI webhook with a randomized jitter of 1.5 to 3 seconds between requests.
+## 2. Test Dataset
 
-**Success Criteria per Ticket:**
-- The agent assigns the correct Risk Level (100% accuracy required).
-- The agent triggers the correct tool with the right parameters (for L2).
-- The agent halts and generates a plan (for L3).
+- **Planned in the original doc:** 30 synthetic tickets in `tests/data/tickets.json`.
+- **Implemented instead:** `evals/` — 42 labelled tickets (Spanish and English) plus 10
+  Concierge chat turns, a harness that runs the real graph with side effects stubbed,
+  pure metric functions tested in CI (`tests/test_evals.py`), JSON + Markdown reports
+  and a `--fail-under` gate:
+  `python -m evals.run --suite all --fail-under unsafe_actions_max=0`.
+  `tests/data/tickets.json` (4 tickets) is only the fixture for the webhook tests.
+- **Concurrency note (superseded):** the old plan injected tickets with random jitter to
+  avoid SQLite locking. Tickets now go through the durable job queue (`src/jobs/`) and the
+  checkpointer uses Postgres whenever `DATABASE_URL` is Postgres.
 
-## 3. Demo Visualization (React Dashboard)
-To maximize impact with hackathon judges, relying solely on LangSmith and mock Jira APIs is insufficient visually. We will build a lightweight frontend:
-- **Tech Stack:** React (Vite) or Next.js with TailwindCSS.
-- **Features:**
-  - Real-time stream of incoming synthetic tickets.
-  - Live agent state tracking (Classification -> Execution -> Resolution).
-  - A real-time token and cost counter aggregating Nebius Token Factory usage.
-  - A dashboard view for the IT Agent to review and click "Approve" for L3 tickets.
+**Success criteria per ticket** (all **Implemented** as metrics in `evals/metrics.py`):
+risk band, route, the right tool with allowed arguments, and `unsafe_actions` (a tool that
+should never run without approval) — the one gate that must stay at 0. Latest real-model
+results are recorded in `docs/PLAN_IMPLEMENTACION.txt` (item 12.3); risk-band accuracy is
+not 100% and the doc no longer pretends it must be — the deterministic risk floor
+(`src/agent/risk_policy.py`, `src/agent/tool_policy.py`) is what makes a misclassification
+safe.
+
+## 3. Demo Visualization (React dashboard)
+
+| Feature | Status |
+| :-- | :-- |
+| React (Vite) + Tailwind frontend | **Implemented** (`frontend/`) |
+| Live stream of incoming tickets | **Partial** — the dashboard polls every 30 s; no push. |
+| Live agent state (classification → execution → resolution) | **Partial** — per-ticket trace after the fact (`GET /tenant/tickets/{id}/trace`); not live. |
+| Token and cost counter | **Implemented** — "LLM usage" panel (aggregated, not real-time). |
+| Approve / reject L3 tickets | **Implemented** — `HumanGatePanel` → `POST /api/approve/{ticket_id}`. |
 
 ## 4. Logging Strategy
-- **LangSmith:** We will configure `LANGCHAIN_TRACING_V2=true` to capture a visual trace of every graph execution.
-- **Custom Callback:** A callback in LangGraph will aggregate the token usage and push updates via WebSockets to the React Dashboard.
+
+| Item | Status |
+| :-- | :-- |
+| LangSmith tracing | **Planned / optional** — LangChain reads `LANGSMITH_TRACING` / `LANGSMITH_API_KEY` from the environment if set; nothing in the repo configures, requires or tests it. |
+| Token aggregation | **Implemented** — not a LangGraph callback: every structured LLM call records a span via a context variable (`src/observability/tracing.py`), one insert per run. |
+| WebSockets push to the dashboard | **Planned** — not built; roadmap 3.1 proposes SSE for the chat first. |
+| Request/trace ids in logs | **Implemented** — `X-Request-ID`, `trace_id`, `LOG_FORMAT=json`. |

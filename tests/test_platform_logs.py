@@ -4,7 +4,6 @@ every outgoing request is recorded, so "read-only" is asserted on what would
 actually hit the network, not on what the code intends.
 """
 import asyncio
-import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -200,7 +199,7 @@ def test_errors_come_first_and_budget_is_enforced():
     entries.append(_entry("the real error", level="error", minute=59))
     lines = compact(entries, max_chars=4000)
     assert "the real error" in lines[0]
-    assert sum(len(l) + 1 for l in lines) <= 4000 + 1
+    assert sum(len(line) + 1 for line in lines) <= 4000 + 1
 
 
 def test_logs_are_fenced_as_data():
@@ -213,7 +212,14 @@ def test_logs_are_fenced_as_data():
 
 from src.integrations.logs.base import ServiceState  # noqa: E402
 from src.integrations.logs.diagnosis import (  # noqa: E402
-    DEGRADED, DOWN, UNKNOWN, UP, compute_verdict, extract_frames, locations_from_logs, map_to_repo,
+    DEGRADED,
+    DOWN,
+    UNKNOWN,
+    UP,
+    compute_verdict,
+    extract_frames,
+    locations_from_logs,
+    map_to_repo,
 )
 
 
@@ -255,7 +261,7 @@ def test_node_and_python_frames_map_to_repo_files():
     py = 'Traceback:\n  File "/app/worker/app/jobs.py", line 42, in run\nKeyError: x'
     frames = extract_frames(node) + extract_frames(py)
     locations = map_to_repo(frames, _TREE)
-    assert [(l.repo_path, l.line) for l in locations] == [
+    assert [(loc.repo_path, loc.line) for loc in locations] == [
         ("backend/src/controllers/cartController.js", 11), ("backend/src/server.js", 30), ("worker/app/jobs.py", 42),
     ]
 

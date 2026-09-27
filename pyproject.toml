@@ -1,0 +1,34 @@
+[project]
+name = "aether-itsm"
+version = "0.1.0"
+description = "Multi-tenant agentic ITSM: LangGraph agents with deterministic guardrails"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["core-ecommerce-api", "frontend", "migrations/versions"]
+
+[tool.ruff.lint]
+# pyflakes + pycodestyle + import sorting + bugbear.
+select = ["F", "E", "W", "I", "B"]
+ignore = [
+    "B008",  # FastAPI's Depends()/Header() in argument defaults is the framework's idiom
+    "E501",  # prompts and regexes read better unwrapped; line-length only guides new code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E402"]  # conftest sets env vars before importing src.*
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+# Report errors only in the files below; imported modules are analysed but not (yet) held to it.
+follow_imports = "silent"
+# Typed core first (roadmap 1.4): the agent's decision code and the security layer.
+files = ["src/agent", "src/security"]

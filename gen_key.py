@@ -1,12 +1,7 @@
-import base64
-import os
+"""Appends a fresh Fernet ENCRYPTION_KEY to .env (never to .env.example)."""
 from cryptography.fernet import Fernet
 
-key = Fernet.generate_key().decode('utf-8')
-print(f'NEW_FERNET_KEY={key}')
-
-with open('.env', 'a', encoding='utf-8') as f:
+key = Fernet.generate_key().decode("utf-8")
+with open(".env", "a", encoding="utf-8") as f:
     f.write(f'\nENCRYPTION_KEY="{key}"\n')
-
-with open('.env.example', 'a', encoding='utf-8') as f:
-    f.write(f'\nENCRYPTION_KEY="your_32_byte_urlsafe_base64_encryption_key_here"\n')
+print("ENCRYPTION_KEY appended to .env")

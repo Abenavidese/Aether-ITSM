@@ -1,21 +1,25 @@
 import logging
-import os
+import threading
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import List
+
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from src.rag.chunking import chunk_document
-from langchain_postgres import PGVector
 from langchain_core.documents import Document
-from src.rag.embeddings import get_embeddings
+from langchain_postgres import PGVector
+
 from src.config import get_settings
 from src.db.tenant_scope import tenant_session
+from src.rag.chunking import chunk_document
+from src.rag.embeddings import get_embeddings
 from src.security.prompt_safety import find_injection_markers
 from src.security.redaction import redact_document
 
 logger = logging.getLogger(__name__)
 
-@lru_cache(maxsize=1)
+_vector_store: PGVector | None = None
+_vector_store_lock = threading.Lock()
+
+
 def get_vector_store() -> PGVector:
     """
     Returns a process-wide singleton PGVector store.
@@ -29,7 +33,23 @@ def get_vector_store() -> PGVector:
     available connections and every subsequent RAG call blocks for minutes
     waiting for one — this is the fix for exactly that symptom, found live
     during a chat session that got slower with every turn.
+
+    Built under a lock, not @lru_cache: the Concierge runs its two RAG lookups
+    in parallel worker threads, both missed the empty cache on the first chat
+    after startup and both built a PGVector — the second one crashed
+    redefining langchain-postgres' ORM tables ("Table 'langchain_pg_collection'
+    is already defined"), a 500 on the first chat of every fresh process
+    (found live in the docker-compose stack).
     """
+    global _vector_store
+    if _vector_store is None:
+        with _vector_store_lock:
+            if _vector_store is None:
+                _vector_store = _build_vector_store()
+    return _vector_store
+
+
+def _build_vector_store() -> PGVector:
     settings = get_settings()
     db_url = settings.database_url
     if db_url.startswith("postgres://"):
@@ -177,7 +197,7 @@ def retrieve_context(tenant_id: str, query: str, source_type: str = "company_pol
         + doc.page_content
         for doc in docs
     )
-    
+
 def get_uploaded_files(tenant_id: str) -> List[dict]:
     """Returns a list of files with their source_type uploaded by the tenant."""
     # Since PGVector in langchain doesn't easily expose distinct metadata via the high-level API,
@@ -190,13 +210,13 @@ def get_uploaded_files(tenant_id: str) -> List[dict]:
         try:
             query = text("""
                 SELECT DISTINCT cmetadata->>'filename' as filename, cmetadata->>'source_type' as source_type
-                FROM langchain_pg_embedding 
+                FROM langchain_pg_embedding
                 WHERE cmetadata->>'tenant_id' = :tenant_id
                 AND cmetadata->>'filename' IS NOT NULL
             """)
             result = conn.execute(query, {"tenant_id": tenant_id}).fetchall()
             return [{"filename": row[0], "source_type": row[1] or "company_policy"} for row in result if row[0]]
-        except Exception as e:
+        except Exception:
             # Table might not exist yet if nothing was uploaded
             return []
 
@@ -206,7 +226,7 @@ def delete_file(tenant_id: str, filename: str):
     # Tenant-scoped session: under RLS the database enforces the filter too (roadmap 2.5).
     with tenant_session(tenant_id) as conn:
         query = text("""
-            DELETE FROM langchain_pg_embedding 
+            DELETE FROM langchain_pg_embedding
             WHERE cmetadata->>'tenant_id' = :tenant_id
             AND cmetadata->>'filename' = :filename
         """)

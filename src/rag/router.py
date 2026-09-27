@@ -61,9 +61,9 @@ async def upload_document(
             source_type=source_type.value,
         )
     except UploadRejected as e:
-        raise HTTPException(status_code=e.status_code, detail=e.detail)
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     except Exception as e:
-        raise internal_error(logger, "Failed to process document", e)
+        raise internal_error(logger, "Failed to process document", e) from e
     finally:
         if stored:
             discard(stored.path)
@@ -98,7 +98,7 @@ def submit_ai_feedback(request: Request, req: FeedbackRequest, current_user: Use
             source_type="ai_feedback"
         )
     except Exception as e:
-        raise internal_error(logger, "Failed to store feedback", e)
+        raise internal_error(logger, "Failed to store feedback", e) from e
     record_knowledge_event(current_user.company_id, current_user.id, "feedback", f"Feedback_{req.ticket_id}",
                            source_type="ai_feedback", report=report)
     return {"status": "success", "message": "Feedback ingested into AI memory."}
@@ -110,7 +110,7 @@ def list_documents(current_user: User = Depends(get_current_user)):
     try:
         return get_uploaded_files(current_user.company_id)
     except Exception as e:
-        raise internal_error(logger, "Failed to list documents", e)
+        raise internal_error(logger, "Failed to list documents", e) from e
 
 
 @router.delete("/{filename}")
@@ -121,6 +121,6 @@ def remove_document(filename: str, current_user: User = Depends(get_current_user
     try:
         delete_file(current_user.company_id, filename)
     except Exception as e:
-        raise internal_error(logger, "Failed to delete document", e)
+        raise internal_error(logger, "Failed to delete document", e) from e
     record_knowledge_event(current_user.company_id, current_user.id, "delete", filename[:200])
     return {"status": "success", "message": f"Deleted {filename}"}

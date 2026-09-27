@@ -10,8 +10,8 @@ from langchain_core.documents import Document
 from pypdf import PdfWriter
 from starlette.datastructures import UploadFile
 
-from src.rag.router import UPLOAD_DIR
 from src.rag.ingest_guard import UploadRejected, sanitize_filename, store_upload, validate_content
+from src.rag.router import UPLOAD_DIR
 from src.rag.service import IngestReport, _secure_chunks
 from src.security.redaction import redact_document
 

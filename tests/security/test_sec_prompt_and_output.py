@@ -5,9 +5,9 @@ import re
 
 import httpx
 import pytest
+from fakes import ScriptedLLM
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
-from fakes import ScriptedLLM
 
 from src.agent.concierge import concierge_node
 from src.agent.context_budget import build_prompt, estimate_tokens
@@ -118,6 +118,7 @@ def test_system_prompt_survives_a_huge_history():
 
 def test_rate_limits_are_keyed_per_user():
     from starlette.requests import Request
+
     from src.security.jwt import create_access_token
     token = create_access_token({"sub": "user-123"})
     with_cookie = Request({"type": "http", "headers": [(b"cookie", f"access_token={token}".encode())],

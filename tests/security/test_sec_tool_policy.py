@@ -2,15 +2,20 @@
 import asyncio
 
 import pytest
-from langchain_core.messages import HumanMessage
 from fakes import ScriptedLLM
+from langchain_core.messages import HumanMessage
 
 from src.agent.graph import route_from_execution
 from src.agent.nodes import draft_plan_node, execution_agent_node, supervisor_node
 from src.agent.risk_policy import enforce_risk_floor
 from src.agent.state import ClassificationResult, ExecutionPlanResult, PolicyCheckResult
 from src.agent.tool_policy import (
-    TOOL_POLICIES, ToolCallContext, ToolPolicyViolation, allowed_tools, authorize, risk_of_tools,
+    TOOL_POLICIES,
+    ToolCallContext,
+    ToolPolicyViolation,
+    allowed_tools,
+    authorize,
+    risk_of_tools,
 )
 
 REQUESTER = "ana.perez@acme.com"
@@ -148,6 +153,7 @@ def test_risk_is_raised_only_once(monkeypatch, mcp, no_rag, monitored):
 def test_underrated_admin_request_ends_at_human_approval(monkeypatch, mcp, no_rag, monitored):
     """Full graph: classifier says 0, execution proposes IAM -> policy -> draft_plan pause."""
     from langgraph.checkpoint.memory import MemorySaver
+
     from src.agent.graph import get_workflow
     nano = ScriptedLLM(ClassificationResult(intent="question", risk_level=0))
     super_llm = ScriptedLLM(

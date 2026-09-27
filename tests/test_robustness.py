@@ -316,3 +316,35 @@ def test_health_stays_fast_while_a_chat_waits_on_blocking_io(tenant, monkeypatch
     status, seconds, chat_status = asyncio.run(scenario())
     assert status == 200 and chat_status == 200
     assert seconds < 0.5, f"/health took {seconds:.2f}s while a chat turn was blocked on I/O"
+
+
+# ── the vector store is built once even when two threads ask at once ──────────
+
+def test_vector_store_singleton_survives_concurrent_first_use(monkeypatch):
+    # Found live (docker-compose, Postgres): the Concierge's two parallel RAG
+    # lookups both built a PGVector on the first chat, and the second crashed
+    # redefining langchain-postgres' tables -> 500.
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.rag import service as rag_service
+
+    builds = []
+    barrier = threading.Barrier(2)
+
+    def slow_build():
+        builds.append(1)
+        time.sleep(0.2)  # connecting + reflecting tables takes a while
+        return object()
+
+    monkeypatch.setattr(rag_service, "_vector_store", None)
+    monkeypatch.setattr(rag_service, "_build_vector_store", slow_build)
+
+    def first_use():
+        barrier.wait()
+        return rag_service.get_vector_store()
+
+    with ThreadPoolExecutor(2) as pool:
+        a, b = pool.map(lambda _: first_use(), range(2))
+    assert a is b
+    assert len(builds) == 1

@@ -9,11 +9,16 @@ handling. Callers are responsible for decrypting the tenant's stored token
 before calling in (see src/security/encryption.py); this module only ever
 sees the raw token for the duration of a single request.
 """
+import re
+
 import httpx
 
 from src.security.sensitive_files import SensitiveFileError, is_sensitive_path
 
 GITHUB_API_BASE = "https://api.github.com"
+# GitHub rejects longer code-search queries with a 400 (found live: a chat
+# message with a screenshot's reading appended exceeded it).
+MAX_CODE_SEARCH_QUERY_CHARS = 256
 
 
 def _headers(token: str) -> dict:
@@ -55,7 +60,7 @@ async def search_code(repo: str, token: str, query: str, max_results: int = 3) -
         response = await client.get(
             f"{GITHUB_API_BASE}/search/code",
             headers=_headers(token),
-            params={"q": f"{query} repo:{repo}"},
+            params={"q": f"{_fit_search_query(query, len(repo))} repo:{repo}"},
         )
 
     if response.status_code != 200:
@@ -64,6 +69,29 @@ async def search_code(repo: str, token: str, query: str, max_results: int = 3) -
 
     items = response.json().get("items", [])[:max_results]
     return [{"path": item["path"], "url": item["html_url"]} for item in items]
+
+
+def _fit_search_query(query: str, repo_len: int) -> str:
+    """
+    Plain search terms only, cut at a word boundary so the full `q` (plus
+    " repo:<repo>") fits GitHub's limit. Search syntax is dropped, not
+    escaped: qualifiers like "repo:other/private" would widen the search to
+    any repo the tenant's token can read (several repo: qualifiers are OR'ed),
+    and quotes/parentheses/tags from pasted errors made GitHub fail with
+    "unable to parse query".
+    """
+    budget = MAX_CODE_SEARCH_QUERY_CHARS - len(" repo:") - repo_len
+    terms = [t for t in _SEARCH_TERM.findall(query) if t.upper() not in _SEARCH_OPERATORS]
+    query = " ".join(terms)
+    if len(query) <= budget:
+        return query
+    cut = query[:budget]
+    return cut.rsplit(" ", 1)[0] if " " in cut else cut
+
+
+# A term never contains ":" (no qualifiers) nor quotes/parentheses.
+_SEARCH_TERM = re.compile(r"[\w][\w.\-/]*")
+_SEARCH_OPERATORS = {"AND", "OR", "NOT"}
 
 
 async def get_repo_tree(repo: str, token: str) -> list[dict]:

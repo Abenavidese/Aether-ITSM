@@ -1,7 +1,10 @@
 # ADR-006: Dual-Environment LLM Architecture (Ollama & Nebius)
 
 ## Status
-Accepted
+Accepted — **Implemented** (`get_llms()`, `get_vision_llm()` and `get_embeddings()` switch on
+`USE_OLLAMA`). Reviewed 2026-09-26: the local stack is `llama3.2:1b` (nano), `llama3.1:8b`
+(super), `qwen2.5vl:3b` (vision) and `nomic-embed-text`; every call has output, timeout and
+context limits. The Nebius path is configured but has not had a live run yet (**Planned**).
 
 ## Context
 During the hackathon and normal development cycles, iterating on LangGraph agents can consume a significant amount of tokens due to the loop-heavy nature of agentic execution. If developers run these tests against cloud providers (e.g., Nebius Token Factory, OpenAI) directly, the API costs can scale rapidly. We need a way to develop and test our graphs locally at $0 cost while ensuring 100% compatibility with the production Nebius deployment.

@@ -1,6 +1,5 @@
 """Fixtures for the Fase 11 security suite (fakes live in tests/fakes.py)."""
 import pytest
-
 from fakes import RecordingMCP
 
 

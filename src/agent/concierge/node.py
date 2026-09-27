@@ -16,7 +16,6 @@ Blocking I/O (DB lookups, embeddings + pgvector) runs in worker threads
 other request (roadmap 2.1).
 """
 import asyncio
-import json
 import logging
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -25,10 +24,16 @@ from langgraph.graph import END, START, StateGraph
 
 from src.agent.context_budget import build_prompt
 from src.agent.mcp_client import MCPToolClient
+from src.agent.messages import latest_text, message_text
 from src.agent.state import ConciergeResult, ConciergeState
 from src.agent.structured_output import invoke_structured
 from src.agent.tool_policy import (
-    ToolCallContext, ToolPolicyViolation, allowed_tools, authorize, identity_params, normalize_url,
+    ToolCallContext,
+    ToolPolicyViolation,
+    allowed_tools,
+    authorize,
+    identity_params,
+    normalize_url,
 )
 from src.config import get_llms
 from src.integrations.logs.diagnosis import DOWN
@@ -39,14 +44,25 @@ from src.rag.service import retrieve_context
 from src.security.redaction import redact_code
 
 from .platform import (
-    _CLAIMED_SERVER_ACTION_PATTERN, _OUTAGE_PATTERN, _SERVER_MUTATION_PATTERN, _health_checker, _pick_services,
+    _CLAIMED_SERVER_ACTION_PATTERN,
+    _OUTAGE_PATTERN,
+    _SERVER_MUTATION_PATTERN,
+    _health_checker,
+    _pick_services,
 )
 from .prompt import build_system_prompt
 from .reply import _compose_reply, _format_tool_output
 from .repo_access import _code_search_context, _fetch_repo_tree, _file_contents_context
 from .repo_view import (
-    _CODE_QUESTION_PATTERN, _DIRECTORY_QUESTION_PATTERN, _FILENAME_PATTERN, _REVIEW_PATTERN, _children,
-    _describe_directory, _extract_paths, _ungrounded_repo_names, _verified_listing_footer,
+    _CODE_QUESTION_PATTERN,
+    _DIRECTORY_QUESTION_PATTERN,
+    _FILENAME_PATTERN,
+    _REVIEW_PATTERN,
+    _children,
+    _describe_directory,
+    _extract_paths,
+    _ungrounded_repo_names,
+    _verified_listing_footer,
 )
 from .turn import TurnContext
 
@@ -66,18 +82,14 @@ _TECHNICAL_ERROR_REPLY = "Sorry, I hit a technical error. I'm opening a ticket s
 async def _gather_context(state: ConciergeState, mcp_client: MCPToolClient) -> TurnContext:
     user_context = state.get("user_context", {})
     tenant_id = user_context.get("tenant_id")
-    user_query = state["messages"][-1].content if state["messages"] else ""
-    if not isinstance(user_query, str):
-        user_query = json.dumps(user_query)
+    user_query = latest_text(state["messages"])
 
     # A short follow-up like "and in middleware?" carries no trigger word of
     # its own — it only makes sense after a prior "list the files in X"
     # message. Checking the last couple of messages (not just this one) for
     # the *trigger* catches that, while keyword extraction still runs on the
     # current message alone (it already contains "middleware").
-    recent_text = " ".join(
-        str(m.content) for m in state["messages"][-3:] if isinstance(getattr(m, "content", None), str)
-    )
+    recent_text = " ".join(message_text(m) for m in state["messages"][-3:])
     turn = TurnContext(user_query=user_query, recent_text=recent_text)
     if not tenant_id:
         return turn
@@ -233,9 +245,7 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
     # window so the system prompt is never the part that gets cut.
     messages = build_prompt(build_system_prompt(turn, catalog), state["messages"])
 
-    user_text = " ".join(
-        str(m.content) for m in state["messages"] if isinstance(m, HumanMessage) and isinstance(m.content, str)
-    )
+    user_text = " ".join(message_text(m) for m in state["messages"] if isinstance(m, HumanMessage))
     try:
         result = await _generate_grounded(llm_super, messages, turn, user_text)
     except Exception as e:

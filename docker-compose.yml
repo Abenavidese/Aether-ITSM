@@ -1,0 +1,66 @@
+# Full local demo:  docker compose up --build   ->  http://localhost:8080
+#
+# Needs a .env with JWT_SECRET_KEY, SUPERADMIN_PASSWORD and ENCRYPTION_KEY
+# (cp .env.example .env && python gen_key.py — see README). Everything else
+# about the database and models is set here, so a DATABASE_URL in your .env
+# (e.g. Supabase) is never used by the containers.
+#
+# LLMs: by default the API talks to Ollama running on the HOST (the usual dev
+# setup, models already pulled). To run Ollama in a container instead:
+#   OLLAMA_HOST=http://ollama:11434 docker compose --profile ollama up --build
+# and pull the models once: docker compose exec ollama ollama pull llama3.1:8b  (etc.)
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: aether
+      POSTGRES_PASSWORD: aether
+      POSTGRES_DB: aether
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether -d aether"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      DATABASE_URL: postgresql://aether:aether@db:5432/aether
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      CORS_ORIGINS: http://localhost:8080
+      DB_AUTO_MIGRATE: "False"       # the container runs `python -m src.db.migrate` itself
+      JOBS_EMBEDDED_WORKER: "True"
+      DB_RLS_ENABLED: "False"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  web:
+    build: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+
+volumes:
+  pgdata:
+  ollama:

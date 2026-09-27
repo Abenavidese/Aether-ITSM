@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Message } from '../components/ChatBubble';
 import { config } from '../../../config';
+import { apiErrorMessage } from '../../../utils/apiError';
 
 const POLL_INTERVAL_MS = 5000;
 const POLL_MAX_ATTEMPTS = 12; // ~1 minute
@@ -76,14 +77,14 @@ export function useChat() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage.text })
+        body: JSON.stringify({ message: userMessage.text, image_base64: userMessage.image_url ?? null })
       });
       const data = await res.json();
 
       setMessages(prev => prev.filter(m => m.id !== thinkingId));
 
       if (!res.ok) {
-        appendAgentMessage(data.detail || "Sorry, I couldn't process that. Please try again.");
+        appendAgentMessage(apiErrorMessage(data, "Sorry, I couldn't process that. Please try again."));
         return;
       }
 

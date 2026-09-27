@@ -1,10 +1,12 @@
 from sqlalchemy.orm import Session
+
+from src.auth.exceptions import EmailAlreadyRegistered, InvalidCredentials
+from src.auth.schemas import UserCreate
 from src.db import models
-from src.security.hashing import get_password_hash, verify_password
 from src.security.api_keys import generate_api_key, hash_api_key
 from src.security.encryption import encrypt_token
-from src.auth.schemas import UserCreate
-from src.auth.exceptions import EmailAlreadyRegistered, InvalidCredentials
+from src.security.hashing import get_password_hash, verify_password
+
 
 def create_tenant_and_user(db: Session, user: UserCreate) -> models.User:
     """
@@ -29,7 +31,7 @@ def create_tenant_and_user(db: Session, user: UserCreate) -> models.User:
     )
     db.add(db_company)
     db.flush() # Get company ID without committing transaction
-    
+
     # Create User
     hashed_pwd = get_password_hash(user.password)
     db_user = models.User(
@@ -42,11 +44,11 @@ def create_tenant_and_user(db: Session, user: UserCreate) -> models.User:
         company_id=db_company.id
     )
     db.add(db_user)
-    
+
     # Atomic commit for both
     db.commit()
     db.refresh(db_user)
-    
+
     return db_user
 
 def authenticate_user(db: Session, email: str, password: str) -> models.User:

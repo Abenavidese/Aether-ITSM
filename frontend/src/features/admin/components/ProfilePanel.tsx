@@ -2,14 +2,19 @@ import { useState, useEffect } from 'react';
 import { User, Building2, BrainCircuit } from 'lucide-react';
 import { config } from '../../../config';
 
+const MODEL_ROLES = [
+  { key: 'nano', label: 'Ticket classification' },
+  { key: 'super', label: 'Reasoning, policy & chat' },
+  { key: 'vision', label: 'Screenshot reading' },
+] as const;
+
 export function ProfilePanel() {
   
   const [settings, setSettings] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ 
     user_full_name: '', 
-    company_name: '',
-    llm_engine: ''
+    company_name: ''
   });
 
   const fetchSettings = async () => {
@@ -22,8 +27,7 @@ export function ProfilePanel() {
         setSettings(data);
         setEditForm({ 
           user_full_name: data.user_full_name || '', 
-          company_name: data.company_name || '',
-          llm_engine: data.llm_engine || ''
+          company_name: data.company_name || ''
         });
       }
     } catch (err) {
@@ -117,30 +121,23 @@ export function ProfilePanel() {
           )}
         </div>
 
-        {/* LLM Engine */}
+        {/* AI models — read-only: platform configuration, not a tenant setting */}
         <div>
           <div className="flex items-center gap-2 mb-2">
             <BrainCircuit className="text-emerald-400" size={16} />
-            <label className="text-sm font-medium text-slate-300">AI LLM Engine</label>
+            <label className="text-sm font-medium text-slate-300">AI Models</label>
           </div>
-          {isEditing ? (
-            <select
-              value={editForm.llm_engine}
-              onChange={(e) => setEditForm({...editForm, llm_engine: e.target.value})}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-emerald-500 transition-colors appearance-none"
-            >
-              <option value="nemotron-nano">NVIDIA Nemotron Nano</option>
-              <option value="gpt-4o">OpenAI GPT-4o</option>
-            </select>
-          ) : (
-            <div className="bg-slate-950/50 border border-slate-800 rounded-lg px-4 py-2.5 text-emerald-300 font-medium text-sm">
-              {settings.llm_engine === 'nemotron-nano' ? 'NVIDIA Nemotron Nano' : 
-               settings.llm_engine === 'gpt-4o' ? 'OpenAI GPT-4o' : 
-               settings.llm_engine || 'nemotron-nano'}
-            </div>
-          )}
+          <div className="bg-slate-950/50 border border-slate-800 rounded-lg px-4 py-3 text-sm space-y-1">
+            {MODEL_ROLES.map(({ key, label }) => (
+              <div key={key} className="flex justify-between gap-4">
+                <span className="text-slate-400">{label}</span>
+                <span className="font-mono text-emerald-300">{settings.llm_models?.[key] ?? 'disabled'}</span>
+              </div>
+            ))}
+          </div>
           <p className="text-xs text-slate-500 mt-2">
-            The core engine used for ticket classification and autonomous resolution.
+            Served by <span className="font-mono">{settings.llm_models?.provider ?? 'unknown'}</span>. Models are
+            set by the platform operator, not per workspace.
           </p>
         </div>
 

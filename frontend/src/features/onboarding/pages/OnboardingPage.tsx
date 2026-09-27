@@ -1,21 +1,22 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Sparkles, ArrowRight, ShieldCheck, Cpu, KeyRound, CheckCircle2 } from 'lucide-react';
+import { Sparkles, ArrowRight, ShieldCheck, KeyRound, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { config } from '../../../config';
+
+// Models are platform configuration (see Settings > Profile), not a
+// per-tenant choice, so onboarding is just the agreements + GitHub.
+const TOTAL_STEPS = 2;
 
 export function OnboardingPage() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   
   // Settings State
-  const [llmEngine, setLlmEngine] = useState('nemotron-nano');
   const [githubToken, setGithubToken] = useState('');
   const [githubUser, setGithubUser] = useState('');
   const [githubRepoName, setGithubRepoName] = useState('');
 
   const { login } = useAuth(); // We might need to refresh token to update onboarding_completed
-  const navigate = useNavigate();
 
   
   const handleComplete = async () => {
@@ -28,7 +29,6 @@ export function OnboardingPage() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          llm_engine: llmEngine,
           github_token: githubToken,
           github_repo: `${githubUser}/${githubRepoName}`
         })
@@ -58,7 +58,7 @@ export function OnboardingPage() {
         
         {/* Progress Bar */}
         <div className="flex w-full h-1.5 bg-slate-800">
-          <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${(step / 3) * 100}%` }} />
+          <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${(step / TOTAL_STEPS) * 100}%` }} />
         </div>
 
         <div className="p-10 sm:p-12">
@@ -92,48 +92,8 @@ export function OnboardingPage() {
             </div>
           )}
 
-          {/* STEP 2: AI ENGINE */}
+          {/* STEP 2: GITHUB INTEGRATION */}
           {step === 2 && (
-            <div className="animate-in fade-in slide-in-from-right-4 duration-500">
-              <div className="w-16 h-16 bg-cyan-500/20 rounded-2xl flex items-center justify-center mb-6 border border-cyan-500/30">
-                <Cpu className="text-cyan-400" size={32} />
-              </div>
-              <h1 className="text-3xl font-bold text-white mb-4">Select AI Engine</h1>
-              <p className="text-slate-400 text-lg leading-relaxed mb-8">
-                Choose the underlying NVIDIA Nemotron model that will power your tenant. You can change this later based on your ticket volume.
-              </p>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                <div 
-                  onClick={() => setLlmEngine('nemotron-nano')}
-                  className={`p-5 rounded-xl border-2 cursor-pointer transition-all ${llmEngine === 'nemotron-nano' ? 'border-cyan-500 bg-cyan-500/10' : 'border-slate-800 bg-slate-950/50 hover:border-slate-600'}`}
-                >
-                  <h3 className="text-white font-semibold text-lg mb-1">Nemotron Nano</h3>
-                  <p className="text-slate-400 text-sm mb-4">Fastest response time, lowest cost. Ideal for standard L1 tickets.</p>
-                  <div className="text-xs font-semibold text-cyan-400 bg-cyan-500/20 inline-block px-2 py-1 rounded">Recommended</div>
-                </div>
-
-                <div 
-                  onClick={() => setLlmEngine('nemotron-super')}
-                  className={`p-5 rounded-xl border-2 cursor-pointer transition-all ${llmEngine === 'nemotron-super' ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800 bg-slate-950/50 hover:border-slate-600'}`}
-                >
-                  <h3 className="text-white font-semibold text-lg mb-1">Nemotron Super</h3>
-                  <p className="text-slate-400 text-sm mb-4">Deep reasoning capabilities. Ideal for complex infrastructure analysis.</p>
-                  <div className="text-xs font-semibold text-indigo-400 bg-indigo-500/20 inline-block px-2 py-1 rounded">High Cost</div>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => setStep(3)}
-                className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(8,145,178,0.3)] flex justify-center items-center gap-2"
-              >
-                Configure Integration <ArrowRight size={18} />
-              </button>
-            </div>
-          )}
-
-          {/* STEP 3: GITHUB INTEGRATION */}
-          {step === 3 && (
             <div className="animate-in fade-in slide-in-from-right-4 duration-500">
               <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mb-6 border border-emerald-500/30">
                 <KeyRound className="text-emerald-400" size={32} />

@@ -1,6 +1,9 @@
-import jwt
 from datetime import datetime, timedelta, timezone
+
+import jwt
+
 from src.config import get_settings
+
 
 def create_access_token(data: dict) -> str:
     settings = get_settings()

@@ -6,6 +6,7 @@ cookie one endpoint just wrote can be silently rejected/dropped when read
 back under different Secure/SameSite semantics.
 """
 from fastapi import Response
+
 from src.config import get_settings
 
 ACCESS_TOKEN_COOKIE = "access_token"

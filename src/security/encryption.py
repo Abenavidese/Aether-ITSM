@@ -1,7 +1,7 @@
-import base64
-import hashlib
 from cryptography.fernet import Fernet
+
 from src.config import get_settings
+
 
 def _get_fernet() -> Fernet:
     """

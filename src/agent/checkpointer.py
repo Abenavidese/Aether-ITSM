@@ -73,20 +73,23 @@ async def open_checkpointer(settings: Settings) -> AsyncIterator[BaseCheckpointS
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
         logger.info("Checkpointer: AsyncSqliteSaver at %s", settings.checkpoint_db_path)
-        async with AsyncSqliteSaver.from_conn_string(settings.checkpoint_db_path) as saver:
-            yield saver
+        async with AsyncSqliteSaver.from_conn_string(settings.checkpoint_db_path) as sqlite_saver:
+            yield sqlite_saver
         return
 
     _assert_psycopg_compatible_loop()
 
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-    from psycopg.rows import dict_row
+    from psycopg import AsyncConnection
+    from psycopg.rows import DictRow, dict_row
     from psycopg_pool import AsyncConnectionPool
 
     logger.info("Checkpointer: AsyncPostgresSaver (pool max_size=%d)", settings.checkpoint_pool_max_size)
     async with AsyncConnectionPool(
         conninfo=_postgres_conninfo(settings.database_url),
         max_size=settings.checkpoint_pool_max_size,
+        # Typed as dict-row connections, matching row_factory below (the saver requires both).
+        connection_class=AsyncConnection[DictRow],
         kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
         open=False,
     ) as pool:

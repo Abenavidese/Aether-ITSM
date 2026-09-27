@@ -8,8 +8,14 @@ import sys
 os.environ["JWT_SECRET_KEY"] = "test-secret-key"
 os.environ["DATABASE_URL"] = "sqlite:///./test_app.db"
 os.environ["USE_OLLAMA"] = "True"
-os.environ["OLLAMA_MODEL"] = "llama3.1"
 os.environ["CHECKPOINT_DB_PATH"] = "test_checkpoints.db"
+# The test DB is built by the real Alembic migrations (importing src.main
+# applies them), so every run also proves the migrations still produce a
+# working schema. A leftover file from an earlier run would be "adopted" as a
+# pre-Alembic database instead — start from nothing.
+os.environ["DB_AUTO_MIGRATE"] = "True"
+if os.path.exists("test_app.db"):
+    os.remove("test_app.db")
 # Tests drive queue jobs explicitly (JobWorker.run_once); a background worker
 # would race them and need a live model.
 os.environ["JOBS_EMBEDDED_WORKER"] = "False"

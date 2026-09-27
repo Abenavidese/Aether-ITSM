@@ -45,7 +45,7 @@ class ServiceDiagnosis:
                  "Evidence: " + "; ".join(self.verdict.evidence)]
         if self.locations:
             parts.append("Code locations from the error stack traces: "
-                         + ", ".join(f"{l.repo_path}:{l.line}" for l in self.locations))
+                         + ", ".join(f"{loc.repo_path}:{loc.line}" for loc in self.locations))
         if self.notes:
             parts.append("Notes: " + "; ".join(self.notes))
         if include_raw_logs and self.log_lines:
@@ -69,7 +69,7 @@ class ServiceDiagnosis:
         """
         lines = [self.verdict_line()]
         if self.locations:
-            lines.append("Ubicaciones en el código: " + ", ".join(f"{l.repo_path}:{l.line}" for l in self.locations))
+            lines.append("Ubicaciones en el código: " + ", ".join(f"{loc.repo_path}:{loc.line}" for loc in self.locations))
         if self.log_lines:
             lines.append(f"({len(self.log_lines)} mensaje(s) distinto(s) de error/aviso en los logs recientes "
                          f"de la plataforma; consultarlos allí.)")

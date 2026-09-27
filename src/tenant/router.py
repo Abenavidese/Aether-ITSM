@@ -1,20 +1,23 @@
 import asyncio
 import json
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, Response
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, field_validator, model_validator
-from typing import Literal, Optional
-from src.db.database import SessionLocal, get_db
-from src.db.tenant_scope import get_tenant_db
-from src.db.models import User, Company, Ticket
-from src.security.deps import get_current_user
-from src.security.jwt import create_access_token
-from src.security.encryption import encrypt_token, decrypt_token
-from src.security.cookies import set_auth_cookie
-from src.integrations.github import get_repo_info
 import re
+from typing import Literal, Optional
 from urllib.parse import urlsplit
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, field_validator, model_validator
+from sqlalchemy.orm import Session
+
+from src.config import active_models
+from src.db.database import SessionLocal, get_db
+from src.db.models import Company, Ticket, User
+from src.db.tenant_scope import get_tenant_db
+from src.integrations.github import get_repo_info
+from src.security.cookies import set_auth_cookie
+from src.security.deps import get_current_user
+from src.security.encryption import decrypt_token, encrypt_token
+from src.security.jwt import create_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +51,6 @@ def _validate_github_repo(v: Optional[str]) -> Optional[str]:
 
 
 class OnboardingPayload(BaseModel):
-    llm_engine: str
     github_token: str
     github_repo: str
 
@@ -58,19 +60,18 @@ class OnboardingPayload(BaseModel):
 def complete_onboarding(payload: OnboardingPayload, response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Only superadmins can configure the tenant.")
-    
+
     company = db.query(Company).filter(Company.id == current_user.company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found.")
-        
+
     # Update settings
-    company.llm_engine = payload.llm_engine
     company.github_token = encrypt_token(payload.github_token)
     company.github_repo = payload.github_repo
     company.onboarding_completed = "true"
-    
+
     db.commit()
-    
+
     # Generate a new token with the updated onboarding status
     token_data = {
         "sub": current_user.id,
@@ -79,12 +80,12 @@ def complete_onboarding(payload: OnboardingPayload, response: Response, db: Sess
         "tenant_id": current_user.company_id,
         "onboarding_completed": "true"
     }
-    
+
     access_token = create_access_token(data=token_data)
     set_auth_cookie(response, access_token)
 
     return {
-        "status": "success", 
+        "status": "success",
         "message": "Tenant onboarding completed."
     }
 
@@ -92,7 +93,7 @@ def complete_onboarding(payload: OnboardingPayload, response: Response, db: Sess
 def get_tenant_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
-        
+
     company = db.query(Company).filter(Company.id == current_user.company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found.")
@@ -110,9 +111,9 @@ def get_tenant_settings(db: Session = Depends(get_db), current_user: User = Depe
         "github_token": "MASKED" if company.github_token else "",
         "github_repo": company.github_repo,
         "api_key": displayed_api_key,
-        "webhook_url": company.webhook_url,
-        "mcp_server_url": company.mcp_server_url,
-        "llm_engine": company.llm_engine,
+        # Read-only: models are platform configuration (src/config.py), not
+        # a per-tenant choice — shown so the admin knows what answers them.
+        "llm_models": active_models(),
         "onboarding_completed": company.onboarding_completed == "true",
         "user_full_name": current_user.full_name,
         "user_job_title": current_user.job_title,
@@ -178,7 +179,6 @@ class MonitoredService(BaseModel):
 class UpdateSettingsPayload(BaseModel):
     github_token: Optional[str] = None
     github_repo: Optional[str] = None
-    llm_engine: Optional[str] = None
     user_full_name: Optional[str] = None
     company_name: Optional[str] = None
     monitored_services: Optional[list[MonitoredService]] = None
@@ -204,20 +204,18 @@ class UpdateSettingsPayload(BaseModel):
 def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
-        
+
     company = db.query(Company).filter(Company.id == current_user.company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found.")
-        
+
     if payload.github_token is not None and payload.github_token != "MASKED":
         company.github_token = encrypt_token(payload.github_token)
     if payload.github_repo is not None:
         company.github_repo = payload.github_repo
-    if payload.llm_engine is not None:
-        company.llm_engine = payload.llm_engine
     if payload.company_name is not None:
         company.name = payload.company_name
-        
+
     if payload.user_full_name is not None:
         current_user.full_name = payload.user_full_name
     if payload.monitored_services is not None:
@@ -228,7 +226,7 @@ def update_tenant_settings(payload: UpdateSettingsPayload, db: Session = Depends
     _set_write_only_secret(company, "vercel_drain_secret", payload.vercel_drain_secret)
 
     db.commit()
-    
+
     return {"status": "success", "message": "Settings updated"}
 
 def _github_credentials(company_id: str) -> tuple[str, str]:
@@ -260,7 +258,7 @@ async def test_github_connection(current_user: User = Depends(get_current_user))
         repo_data = await get_repo_info(repo, token)
     except RuntimeError as e:
         logger.warning("GitHub connection test failed for company %s: %s", current_user.company_id, e)
-        raise HTTPException(status_code=400, detail=f"Failed to connect: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to connect: {e}") from e
 
     return {
         "status": "success",
@@ -295,7 +293,7 @@ async def test_log_connection(service_name: str, current_user: User = Depends(ge
     except PlatformAPIError as e:
         logger.warning("Log connection test failed for company %s: %s", current_user.company_id, e)
         detail = "Invalid API key or no access to that service." if e.status_code in (401, 403, 404) else f"platform API error ({e.status_code})"
-        raise HTTPException(status_code=400, detail=f"Failed to connect: {detail}")
+        raise HTTPException(status_code=400, detail=f"Failed to connect: {detail}") from e
 
     return {
         "status": "success",
@@ -329,22 +327,22 @@ def get_log_access_audit(limit: int = 50, db: Session = Depends(get_tenant_db),
 def get_dashboard_metrics(db: Session = Depends(get_tenant_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
-        
+
     company_id = current_user.company_id
-    
+
     # Base query for all tickets in this tenant
     base_query = db.query(Ticket).filter(Ticket.tenant_id == company_id)
-    
+
     total_tickets = base_query.count()
     resolved_tickets = base_query.filter(Ticket.status == "resolved").count()
     autonomous_tickets = base_query.filter(Ticket.resolution_path == "autonomous").count()
     pending_human = base_query.filter(Ticket.status == "pending_human").count()
-    
+
     # Auto-deflection rate = (autonomous / total) * 100
     auto_deflection_rate = 0
     if total_tickets > 0:
         auto_deflection_rate = (autonomous_tickets / total_tickets) * 100
-        
+
     # Calculate savings
     # Use SQLite compatible sum
     from sqlalchemy.sql import func
@@ -352,13 +350,13 @@ def get_dashboard_metrics(db: Session = Depends(get_tenant_db), current_user: Us
         func.sum(Ticket.estimated_time_saved_minutes).label("time_saved"),
         func.sum(Ticket.cost_saved_usd).label("cost_saved")
     ).filter(Ticket.tenant_id == company_id).first()
-    
+
     time_saved_hours = (savings.time_saved or 0) / 60
     cost_saved = savings.cost_saved or 0.0
-    
+
     # Get recent tickets for stream
     recent_tickets = base_query.order_by(Ticket.created_at.desc()).limit(10).all()
-    
+
     ticket_stream = []
     for t in recent_tickets:
         ticket_stream.append({
@@ -374,7 +372,7 @@ def get_dashboard_metrics(db: Session = Depends(get_tenant_db), current_user: Us
             "github_issue_url": t.github_issue_url,
             "proposed_plan": t.proposed_plan,
         })
-        
+
     return {
         "metrics": {
             "total_tickets": total_tickets,

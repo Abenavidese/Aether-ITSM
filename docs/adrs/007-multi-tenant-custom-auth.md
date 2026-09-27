@@ -1,7 +1,16 @@
 # ADR-007: Multi-Tenant Architecture & Custom Authentication
 
 ## Status
-Accepted
+Accepted. Reviewed against the code on 2026-09-26 (roadmap 1.3):
+- **Implemented:** in-house JWT auth (bcrypt via passlib), token in an httpOnly cookie
+  (`Secure` flag via `COOKIE_SECURE`, off by default for local http); tenant id and role in
+  the claims; every tenant route resolves the user from the DB and scopes queries by
+  `company_id`; ticket threads are namespaced by tenant.
+- **Partial:** "any database query is strictly scoped" relies on application filters.
+  Postgres Row-Level Security is written and tested (`src/db/rls/`, CI runs it) but only
+  enforced once the owner applies it (`DB_RLS_ENABLED=true`).
+- **Superseded:** SQLite-only identity DB — Postgres (Supabase) is supported and the schema
+  is managed by Alembic migrations; checkpoints live in Postgres too when configured.
 
 ## Context
 Aether ITSM is pivoting from a single-instance demo to a B2B SaaS platform. This requires the system to support multiple companies (Tenants), where each company has its own isolated data, users, and AI context. Furthermore, we must decide how to manage user identity and authentication.

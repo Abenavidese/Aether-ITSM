@@ -1,20 +1,32 @@
 import asyncio
 import json
 import logging
+
 from langchain_core.runnables import RunnableConfig
-from .context_budget import build_prompt
-from .mcp_client import MCPToolClient
-from .risk_policy import enforce_risk_floor
-from .state import AgentState, ClassificationResult, ExecutionPlanResult, PolicyCheckResult
-from .structured_output import invoke_structured as _invoke_structured
-from .tool_policy import (
-    AuthorizedToolCall, ToolCallContext, ToolPolicyViolation, allowed_tools, authorize, identity_params, normalize_url,
-    proposable_tools, required_risk, risk_of_tools,
-)
+
 from src.config import get_llms
 from src.integrations.monitoring import get_monitored_services
 from src.rag.service import retrieve_context
 from src.security.prompt_safety import UNTRUSTED_DATA_POLICY, untrusted_block
+
+from .context_budget import build_prompt
+from .mcp_client import MCPToolClient
+from .messages import latest_text
+from .risk_policy import enforce_risk_floor
+from .state import AgentState, ClassificationResult, ExecutionPlanResult, PolicyCheckResult
+from .structured_output import invoke_structured as _invoke_structured
+from .tool_policy import (
+    AuthorizedToolCall,
+    ToolCallContext,
+    ToolPolicyViolation,
+    allowed_tools,
+    authorize,
+    identity_params,
+    normalize_url,
+    proposable_tools,
+    required_risk,
+    risk_of_tools,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +86,7 @@ async def supervisor_node(state: AgentState) -> dict:
     try:
         result: ClassificationResult = await _invoke_structured(llm_nano, ClassificationResult, messages)
 
-        ticket_text = state["messages"][-1].content if state["messages"] else ""
-        if not isinstance(ticket_text, str):
-            ticket_text = json.dumps(ticket_text)
+        ticket_text = latest_text(state["messages"])
         assessed_risk, floor_reason = enforce_risk_floor(ticket_text, result.risk_level)
         # Second floor source: if the classifier itself says the ticket needs
         # a risk-3 tool, the ticket is at least risk 3, whatever number it gave.
@@ -113,7 +123,7 @@ async def policy_agent_node(state: AgentState) -> dict:
 
     _, llm_super = get_llms()
 
-    user_query = state["messages"][-1].content if state["messages"] else ""
+    user_query = latest_text(state["messages"])
     tenant_id = state.get("user_context", {}).get("tenant_id")
 
     rag_context = ""
@@ -202,7 +212,7 @@ async def execution_agent_node(state: AgentState, config: RunnableConfig) -> dic
             return {"final_resolution": "Execution failed — escalating.", "next_agent": "escalate", "technical_error": True}
 
     _, llm_super = get_llms()
-    user_query = state["messages"][-1].content if state["messages"] else ""
+    user_query = latest_text(state["messages"])
     tenant_id = state.get("user_context", {}).get("tenant_id")
 
     rag_context = ""

@@ -1,25 +1,32 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from src.agent.checkpointer import open_checkpointer
 from src.agent.mcp_client import MCPToolClient
-from src.jobs.worker import WorkerDeps
-from src.tickets.jobs import build_worker
 from src.api.routes import router as webhook_router
 from src.auth.router import router as auth_router
+from src.config import get_settings
+from src.db import (
+    models,
+    tenant_scope,  # noqa: F401 — registers the RLS session listener (roadmap 2.5)
+)
+from src.db.database import engine
+from src.db.migrate import upgrade_to_head
+from src.integrations.logs.router import router as log_drain_router
+from src.jobs.worker import WorkerDeps
+from src.observability.logging import RequestIdMiddleware, configure_logging
+from src.observability.router import router as observability_router
+from src.rag.router import router as rag_router
+from src.security.limiter import limiter
 from src.tenant.router import router as tenant_router
 from src.tenant.user_router import router as user_router
-from src.rag.router import router as rag_router
-from src.integrations.logs.router import router as log_drain_router
-from src.observability.router import router as observability_router
-from src.db.database import engine
-from src.db import models
-from src.db import tenant_scope  # noqa: F401 — registers the RLS session listener (roadmap 2.5)
-from src.config import get_settings
-from src.observability.logging import RequestIdMiddleware, configure_logging
+from src.tickets.jobs import build_worker
 
 settings = get_settings()
 
@@ -27,42 +34,18 @@ settings = get_settings()
 configure_logging(settings.log_format)
 logger = logging.getLogger(__name__)
 
-# Create database tables
-models.Base.metadata.create_all(bind=engine)
-
-
-def _ensure_schema_migrations():
-    """
-    Best-effort ALTER TABLE for columns added after create_all() already ran
-    once on an existing dev DB. There's no Alembic in this project yet, so
-    this keeps existing SQLite/Postgres databases working without a manual
-    step. Safe to run on every startup: failures mean the column already
-    exists.
-    """
-    from sqlalchemy import text
-    with engine.connect() as conn:
-        for statement in (
-            "ALTER TABLE companies ADD COLUMN api_key_hash VARCHAR",
-            "ALTER TABLE tickets ADD COLUMN external_id VARCHAR",
-            "ALTER TABLE companies ADD COLUMN monitored_services VARCHAR",
-            "ALTER TABLE companies ADD COLUMN render_api_key VARCHAR",
-            "ALTER TABLE companies ADD COLUMN vercel_drain_secret VARCHAR",
-            "ALTER TABLE tickets ADD COLUMN proposed_plan VARCHAR",
-        ):
-            try:
-                conn.execute(text(statement))
-                conn.commit()
-            except Exception:
-                conn.rollback()
-
-
-_ensure_schema_migrations()
+# Schema changes are Alembic migrations (migrations/, roadmap 1.4), applied by
+# `alembic upgrade head` / `python -m src.db.migrate` as a deploy step. Only
+# with DB_AUTO_MIGRATE=true (dev, tests) does startup apply them itself — a
+# shared database is never altered just because an API process started.
+if settings.db_auto_migrate:
+    upgrade_to_head(engine)
 
 def seed_database():
-    from src.db.database import SessionLocal
     from src.auth.service import get_password_hash
+    from src.db.database import SessionLocal
     db = SessionLocal()
-    
+
     try:
         # Seed Plans
         plans = [
@@ -70,24 +53,24 @@ def seed_database():
             models.SubscriptionPlan(id="plan_pro", name="Pro", price_usd=49.0, max_users=10, max_tickets_per_month=500, max_ai_resolutions_per_month=250),
             models.SubscriptionPlan(id="plan_enterprise", name="Enterprise", price_usd=199.0, max_users=999, max_tickets_per_month=9999, max_ai_resolutions_per_month=9999)
         ]
-        
+
         for p in plans:
             existing = db.query(models.SubscriptionPlan).filter(models.SubscriptionPlan.id == p.id).first()
             if not existing:
                 db.add(p)
-                
+
         # Seed Superadmin
         sa_email = "admin@aether.ai"
         sa = db.query(models.User).filter(models.User.email == sa_email).first()
         if not sa:
             logger.info("Seeding superadmin account...")
             sa_password = settings.superadmin_password
-                
+
             company = models.Company(name="Aether Systems", industry="SaaS", onboarding_completed="true", plan_id="plan_enterprise")
             db.add(company)
             db.commit()
             db.refresh(company)
-            
+
             user = models.User(
                 email=sa_email,
                 full_name="Platform Creator",
@@ -96,7 +79,7 @@ def seed_database():
                 company_id=company.id
             )
             db.add(user)
-            
+
         db.commit()
     except Exception as e:
         logger.error(f"Error seeding database: {e}")
@@ -133,10 +116,6 @@ async def lifespan(app: FastAPI):
                 await worker_task
             await mcp_client.close()
     logger.info("Shut down checkpointer and MCP tool server")
-
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-from src.security.limiter import limiter
 
 app = FastAPI(
     title="ITSM Agent API",

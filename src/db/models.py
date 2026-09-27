@@ -1,16 +1,19 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, Integer, Float, UniqueConstraint
-from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
-from .database import Base
 import uuid
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from .database import Base
+
 
 class SubscriptionPlan(Base):
     __tablename__ = "subscription_plans"
-    
+
     id = Column(String, primary_key=True)
     name = Column(String) # Free, Pro, Enterprise
     price_usd = Column(Float, default=0.0)
-    
+
     max_users = Column(Integer, default=2)
     max_tickets_per_month = Column(Integer, default=100)
     max_ai_resolutions_per_month = Column(Integer, default=50)
@@ -24,17 +27,13 @@ class Company(Base):
     company_size = Column(String, nullable=True)
     industry = Column(String, nullable=True)
     current_tool = Column(String, nullable=True)
-    
+
     # Integration & Onboarding Settings
     onboarding_completed = Column(String, default="false") # SQLite boolean compatibility
     api_key = Column(String, unique=True, nullable=True)  # Fernet-encrypted — decrypted only for display in Settings
     api_key_hash = Column(String, unique=True, nullable=True, index=True)  # SHA-256 — used to verify webhook calls
-    webhook_url = Column(String, nullable=True) # Kept for legacy
     github_token = Column(String, nullable=True)
     github_repo = Column(String, nullable=True)
-    mcp_server_url = Column(String, nullable=True)
-    mcp_auth_token = Column(String, nullable=True)
-    llm_engine = Column(String, default="nemotron-nano")
     # JSON-encoded list of {"name": str, "url": str} — services the agent can
     # healthcheck via the check_service_status MCP tool (see src/tools/mcp_server.py).
     # Optional per-entry {"provider", "service_id", "owner_id"} link a service
@@ -46,11 +45,11 @@ class Company(Base):
     render_api_key = Column(String, nullable=True)
     # Fernet-encrypted shared secret Vercel signs Log Drain payloads with.
     vercel_drain_secret = Column(String, nullable=True)
-    
+
     plan_id = Column(String, ForeignKey("subscription_plans.id"), nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+
     plan = relationship("SubscriptionPlan")
     users = relationship("User", back_populates="company")
 
@@ -84,28 +83,28 @@ class Ticket(Base):
     # (our internal PK) so a re-delivered webhook can be recognized and
     # skipped instead of reprocessing the same ticket twice.
     external_id = Column(String, nullable=True, index=True)
-    
+
     title = Column(String, nullable=False)
     description = Column(String, nullable=False)
-    
+
     # Classification
     urgency = Column(String, default="medium") # low, medium, high, critical
     category = Column(String, default="general") # software, hardware, access, network, general
-    
+
     # Tracking
     status = Column(String, default="open") # open, resolved, escalated, escalated_github, pending_human
     resolution_path = Column(String, nullable=True) # autonomous, human, github
-    
+
     # Deep Metrics & ROI
     estimated_time_saved_minutes = Column(Integer, default=0)
     cost_saved_usd = Column(Float, default=0.0)
     ai_confidence_score = Column(Float, nullable=True)
-    
+
     # External Links
     github_issue_url = Column(String, nullable=True)
     # Risk-3 plan awaiting approval, incl. the exact action (Fase 11.2).
     proposed_plan = Column(String, nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     resolved_at = Column(DateTime(timezone=True), nullable=True)
 

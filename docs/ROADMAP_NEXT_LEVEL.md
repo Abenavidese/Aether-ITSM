@@ -17,6 +17,8 @@ Estado de partida:
 
 ## 1. Credibilidad: lo que un reviewer detecta rápido
 
+> **Estado (2026-09-26): hecho** — 1.1 con modelo de visión (opción A), 1.2, 1.3 y 1.4. Detalle, hallazgos y CHECKs en `docs/PLAN_IMPLEMENTACION.txt`, Fase 13.
+
 Son arreglos baratos que evitan que una revisión de código encuentre promesas vacías.
 
 ### 1.1 La imagen del chat no se envía

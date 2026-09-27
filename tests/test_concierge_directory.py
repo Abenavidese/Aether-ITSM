@@ -7,7 +7,10 @@ message that previously produced a wrong or empty answer in the chat.
 """
 from src.agent.concierge.repo_access import _format_file
 from src.agent.concierge.repo_view import (
-    _describe_directory, _extract_paths, _ungrounded_repo_names, _verified_listing_footer,
+    _describe_directory,
+    _extract_paths,
+    _ungrounded_repo_names,
+    _verified_listing_footer,
 )
 
 _DIRS = [

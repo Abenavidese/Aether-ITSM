@@ -26,6 +26,7 @@ from typing import Any, Iterable, Mapping
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import TextContent
 
 logger = logging.getLogger(__name__)
 
@@ -116,5 +117,5 @@ class MCPToolClient:
             raise RuntimeError(f"MCP tool '{name}' returned an error: {result.content}")
 
         # mcp_server.py's tools each return a single JSON string in a text block.
-        text_parts = [c.text for c in result.content if getattr(c, "type", None) == "text"]
+        text_parts = [c.text for c in result.content if isinstance(c, TextContent)]
         return "\n".join(text_parts) if text_parts else json.dumps({"status": "success"})

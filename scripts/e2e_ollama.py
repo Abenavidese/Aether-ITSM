@@ -77,7 +77,7 @@ def preflight_ollama():
         models = {m["name"] for m in r.json()["models"]}
     except Exception as e:
         print(f"No pude contactar a Ollama en :11434 ({e}). ¿Está corriendo `ollama serve`?")
-        raise SystemExit(1)
+        raise SystemExit(1) from e
 
     for role, model_name in (("nano", settings.ollama_model_nano), ("super", settings.ollama_model_super)):
         check(f"Modelo '{role}' ('{model_name}') disponible en Ollama", _model_is_pulled(model_name, models),
@@ -206,8 +206,8 @@ def main():
         check("Se resolvió de forma autónoma (sin pasar por aprobación humana)",
               ticket["resolution_path"] == "autonomous", str(ticket))
     else:
-        print(f"    (nota: escalo en lugar de auto-resolverse - revisa los logs; "
-              f"con un modelo local esto puede pasar si el structured output falló)")
+        print("    (nota: escalo en lugar de auto-resolverse - revisa los logs; "
+              "con un modelo local esto puede pasar si el structured output falló)")
 
     print("\n=== Fase 4: ticket de Riesgo 3 (pausa + aprobación humana) ===")
     ticket_high = f"E2E-HIGH-{suffix}"

@@ -1,13 +1,14 @@
-import pytest
-from fastapi.testclient import TestClient
 import json
 import os
-import sqlite3
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.db import models
+from src.db.database import SessionLocal, engine
 
 # Test environment variables are set in tests/conftest.py (before any import).
 from src.main import app
-from src.db import models
-from src.db.database import engine, SessionLocal
 from src.security.api_keys import generate_api_key, hash_api_key
 from src.security.encryption import encrypt_token
 from src.security.hashing import get_password_hash

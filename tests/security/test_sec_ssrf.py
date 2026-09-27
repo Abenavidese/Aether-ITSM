@@ -4,8 +4,8 @@ import json
 
 import httpx
 import pytest
-from langchain_core.messages import HumanMessage
 from fakes import ScriptedLLM
+from langchain_core.messages import HumanMessage
 
 from src.agent.concierge import concierge_node
 from src.agent.state import ConciergeResult

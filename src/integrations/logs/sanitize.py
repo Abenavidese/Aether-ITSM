@@ -14,6 +14,7 @@ import re
 # Redaction rules are shared with the RAG ingest, repo reads and GitHub
 # issues (Fase 11) — re-exported here so existing imports keep working.
 from src.security.redaction import redact  # noqa: F401
+
 from .base import LogEntry
 
 MAX_LINES = 40

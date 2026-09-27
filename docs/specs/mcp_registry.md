@@ -1,48 +1,53 @@
 # MCP Tooling Registry & Policies
 
+> **Status** (reviewed against the code on 2026-09-26, roadmap 1.3): the MCP *protocol*
+> path is **Implemented** — a real MCP server (`src/tools/mcp_server.py`) over stdio, a
+> client that reads its live catalog (`src/agent/mcp_client.py`) and a default-deny policy
+> in code (`src/agent/tool_policy.py`). The tool *backends* are **simulated**: except
+> `check_service_status`, every tool returns a canned JSON result and touches no real
+> VPN, MDM, IAM or knowledge system. Wiring them to real systems is **Planned**.
+
 ## 1. Concept
-The Model Context Protocol (MCP) servers expose strict, parameterized functions. The LLM can only request these functions; it cannot execute raw scripts.
+The MCP server exposes strict, parameterized functions. The LLM can only *propose* a call
+(`tool_name` + `tool_args` in a Pydantic schema); `tool_policy.authorize()` decides in code
+whether it runs. The model never executes scripts.
 
 ## 2. Tool Inventory
 
-### 2.1 `reset_vpn_session`
-- **Description:** Terminates active VPN sessions for a specific user to fix hung connections.
-- **Expected Parameters:**
-  - `user_id` (string): The corporate email or ID.
-- **Default Risk Level:** 2 (Low / Reversible)
-- **Allowed Environments:** Dev, Prod.
-- **Policy Rule:** Fully autonomous execution allowed.
+Risk levels and parameters below are the ones enforced by `TOOL_POLICY` in
+`src/agent/tool_policy.py` — the source of truth; tools not listed there are refused.
 
-### 2.2 `provision_standard_software`
-- **Description:** Adds a user to an AD group that triggers an automated MDM (Mobile Device Management) software install.
-- **Expected Parameters:**
-  - `user_id` (string): The corporate email.
-  - `software_id` (string): Standardized ID (e.g., `pkg_office365`, `pkg_docker`).
-- **Default Risk Level:** 2 (Low / Reversible)
-- **Allowed Environments:** Dev, Prod.
-- **Policy Rule:** Fully autonomous execution allowed ONLY if `software_id` is in the whitelist.
+### 2.1 `reset_vpn_session` — risk 2 — backend simulated
+- **Parameters:** `user_id` — an *identity* parameter: bound to the ticket's requester by
+  code and hidden from the model's catalog, so the agent can't act on someone else's account.
+- **Policy:** runs autonomously when the ticket's assessed risk is ≥ 2 and Policy approved.
 
-### 2.3 `modify_iam_access`
-- **Description:** Modifies cloud or directory access policies.
-- **Expected Parameters:**
-  - `user_id` (string): The corporate email.
-  - `resource_arn` (string): The resource identifier.
-  - `access_level` (string): e.g., `ReadOnly`, `Admin`.
-- **Default Risk Level:** 3 (High)
-- **Allowed Environments:** Dev, Prod.
-- **Policy Rule:** **REQUIRES HUMAN APPROVAL.** The LLM may only draft the parameters. Execution is paused until webhook confirmation.
+### 2.2 `provision_standard_software` — risk 2 — backend simulated
+- **Parameters:** `user_id` (identity, as above), `software_id`.
+- **Policy:** `software_id` must be in `MDM_SOFTWARE_WHITELIST` (validated in code); anything
+  else is refused.
 
-### 2.4 `query_knowledge_base`
-- **Description:** Performs a semantic search over internal Tier 1 support documentation.
-- **Expected Parameters:**
-  - `query_string` (string): The search query.
-- **Default Risk Level:** 0 (Read-Only)
-- **Allowed Environments:** All.
-- **Policy Rule:** Fully autonomous. Never requires approval.
+### 2.3 `modify_iam_access` — risk 3 — backend simulated
+- **Parameters:** `user_id` (identity), `resource_arn`, `access_level`.
+- **Policy:** **requires human approval.** `draft_plan` stores the exact validated call;
+  after `POST /api/approve/{ticket_id}` that frozen call runs with no LLM involved.
+
+### 2.4 `query_knowledge_base` — risk 0 — backend simulated
+- **Parameters:** `query_string`.
+- **Note:** returns two fixed sentences. The real knowledge base is the tenant's RAG store
+  (`src/rag/`), which the agents query directly in code, not through this tool.
+
+### 2.5 `check_service_status` — risk 0 — **real**
+- **Parameters:** `service_url` — must be one of the tenant's configured monitored services;
+  public addresses only, no redirects (`src/security/url_guard.py`).
 
 ## 3. Security Boundary & Retry Logic
-If the LLM generates a tool call for a tool not in this registry, or attempts to pass parameters that violate the JSON schema, the `Pydantic` validator in the FastAPI backend will throw a `ValidationError`.
-
-**Retry Policy:** 
-- The agent is permitted exactly **1 internal retry**. The error message is fed back to the LLM (e.g., *"JSON schema invalid, please correct the 'user_id' field"*).
-- If the LLM fails on the second attempt, the Graph immediately routes to the `Error Edge` and escalates the ticket to Risk Level 4, abandoning automated resolution.
+- **Unknown tool or bad arguments — Implemented.** An unregistered tool, a tool riskier than
+  the ticket, an argument outside the tool's schema or a failed validator raises
+  `ToolPolicyViolation` before any call; the node escalates (or raises the ticket's risk once
+  and re-runs Policy, for a tool that simply needs more approval).
+- **Retries — Implemented, differently than first specified.** The original doc said
+  exactly 1 retry. `src/agent/structured_output.py` allows 2 self-correction retries for
+  output that fails schema validation, re-sending the original prompt plus a short error
+  summary (never the failed output). After that the node reports `technical_error` and the
+  graph escalates.

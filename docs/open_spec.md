@@ -4,6 +4,14 @@
 
 ### Fecha: 13 de Septiembre de 2026 (Auditoría de Seguridad y Estabilidad)
 
+> **Nota de estado (revisado contra el código el 2026-09-26, roadmap 1.3):** este registro
+> describe lo hecho el 13 de septiembre. Correcciones: el "streaming asíncrono en tiempo
+> real" hacia el frontend **no existe** (Planned, roadmap 3.1); el selector de "motor LLM
+> preferido" se **eliminó** porque no tenía efecto (los modelos son configuración de la
+> plataforma, `src/config.py`); la base de datos ya no es solo SQLite (Postgres/Supabase +
+> migraciones Alembic); la cookie usa `Secure` solo con `COOKIE_SECURE=true`. El historial
+> vivo de cambios está en `docs/PLAN_IMPLEMENTACION.txt`.
+
 Durante esta sesión se consolidó la arquitectura y se implementaron funcionalidades clave para la **Hackathon (Nebius x NVIDIA Global AI)**, junto con una refactorización crítica del sistema para el pase a producción.
 
 ## 🚀 Funcionalidades Principales Implementadas
@@ -11,7 +19,7 @@ Durante esta sesión se consolidó la arquitectura y se implementaron funcionali
 1. **Agente IA Autónomo ("Aether") con LangGraph:**
    - Creación de un **Autonomy Cascade** (Máquina de estados): El agente evalúa el nivel de riesgo del ticket de ITSM (Risk Level 1 a 4).
    - Integración con **NVIDIA Nemotron 3** a través de **Nebius Token Factory**.
-   - Soporte para **Streaming Asíncrono** en tiempo real del razonamiento del agente hacia el frontend.
+   - ~~Soporte para Streaming Asíncrono en tiempo real~~ — **Planned** (no implementado; roadmap 3.1).
 
 2. **Integración con GitHub (Model Context Protocol - MCP):**
    - Panel de configuración para conectar repositorios.
@@ -20,7 +28,7 @@ Durante esta sesión se consolidó la arquitectura y se implementaron funcionali
 
 3. **Arquitectura Multi-Tenant (B2B SaaS):**
    - Modelado de base de datos para manejar múltiples Compañías (Tenants) y Usuarios (Admins/Employees).
-   - Sistema de **Onboarding Dinámico** donde las empresas configuran sus credenciales (GitHub) y su motor LLM preferido (`nemotron-nano`, etc.).
+   - Sistema de **Onboarding Dinámico** donde las empresas configuran sus credenciales (GitHub). (El selector de motor LLM se eliminó el 2026-09-26: no tenía efecto.)
    - Soporte para planes de suscripción (Free, Pro, Enterprise).
 
 4. **Dashboard de Administración Moderno (Vite + React + Tailwind):**

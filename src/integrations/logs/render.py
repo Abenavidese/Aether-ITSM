@@ -73,7 +73,7 @@ def _labels(entry: dict) -> dict[str, str]:
     labels = entry.get("labels") or []
     if isinstance(labels, dict):
         return {str(k): str(v) for k, v in labels.items()}
-    return {str(l.get("name")): str(l.get("value")) for l in labels if isinstance(l, dict)}
+    return {str(label.get("name")): str(label.get("value")) for label in labels if isinstance(label, dict)}
 
 
 def _to_entry(raw: dict) -> LogEntry | None:

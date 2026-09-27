@@ -7,6 +7,7 @@ tell "the VPN gateway is actually down" apart from a user-side problem via
 the check_service_status MCP tool (src/tools/mcp_server.py).
 """
 import json
+
 from src.db.database import SessionLocal
 from src.db.models import Company
 

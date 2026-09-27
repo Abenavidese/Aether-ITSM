@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
 from typing import List, Optional
-from src.db.database import get_db
-from src.db.models import User, Company, SubscriptionPlan
-from src.security.deps import get_current_user
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from src.auth.service import get_password_hash
+from src.db.database import get_db
+from src.db.models import Company, SubscriptionPlan, User
+from src.security.deps import get_current_user
 
 router = APIRouter(prefix="/tenant/users", tags=["tenant_users"])
 
@@ -31,9 +33,9 @@ class CreateUserPayload(BaseModel):
 def get_tenant_users(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
-        
+
     users = db.query(User).filter(User.company_id == current_user.company_id).all()
-    
+
     result = []
     for u in users:
         result.append({
@@ -50,26 +52,26 @@ def get_tenant_users(db: Session = Depends(get_db), current_user: User = Depends
 def create_tenant_user(payload: CreateUserPayload, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
-        
+
     company = db.query(Company).filter(Company.id == current_user.company_id).first()
     plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == company.plan_id).first()
-    
+
     if not plan:
         # Default to Free limits if no plan is found
         max_users = 2
     else:
         max_users = plan.max_users
-        
+
     current_user_count = db.query(User).filter(User.company_id == current_user.company_id).count()
-    
+
     if current_user_count >= max_users:
         raise HTTPException(status_code=402, detail=f"Plan limit reached. Your current plan allows a maximum of {max_users} users.")
-        
+
     # Check if email exists
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered.")
-        
+
     new_user = User(
         email=payload.email,
         full_name=payload.full_name,
@@ -78,11 +80,11 @@ def create_tenant_user(payload: CreateUserPayload, db: Session = Depends(get_db)
         role=payload.role,
         company_id=current_user.company_id
     )
-    
+
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    
+
     return {
         "id": new_user.id,
         "email": new_user.email,
@@ -96,15 +98,15 @@ def create_tenant_user(payload: CreateUserPayload, db: Session = Depends(get_db)
 def delete_tenant_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in ["superadmin", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized.")
-        
+
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot delete yourself.")
-        
+
     user_to_delete = db.query(User).filter(User.id == user_id, User.company_id == current_user.company_id).first()
     if not user_to_delete:
         raise HTTPException(status_code=404, detail="User not found.")
-        
+
     db.delete(user_to_delete)
     db.commit()
-    
+
     return {"status": "success", "message": "User deleted."}

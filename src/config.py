@@ -2,10 +2,10 @@
 Centralized application configuration.
 All secrets and settings are loaded from environment variables — no fallbacks for sensitive values.
 """
-import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings
+
 from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     openai_model_super: str = "gpt-4o"
     openai_embedding_model: str = "text-embedding-3-small"
 
+    # Vision model that turns an attached screenshot into text (visible
+    # errors + a short description) for the text-only agents — see
+    # src/agent/vision.py. Disabled -> the agents are told an image was
+    # attached but couldn't be read, never that it said something.
+    vision_enabled: bool = True
+    ollama_model_vision: str = "qwen2.5vl:3b"
+    nebius_model_vision: str = "Qwen/Qwen2.5-VL-72B-Instruct"
+    openai_model_vision: str = "gpt-4o-mini"
+    vision_max_chars: int = 2000
+
     # Limits applied to every LLM call (see get_llms): a structured reply is
     # a few hundred tokens, so 1024 leaves headroom while bounding a runaway
     # generation to seconds instead of forever.
@@ -70,6 +80,12 @@ class Settings(BaseSettings):
     knowledge_upload_max_bytes: int = 10 * 1024 * 1024
     knowledge_upload_max_pdf_pages: int = 300
     knowledge_rate_limit: str = "10/minute"
+
+    # ── Schema migrations (roadmap 1.4) ──
+    # true: the API applies pending Alembic migrations at startup (dev/tests).
+    # Keep false for any shared database: run `python -m src.db.migrate` as a
+    # deliberate deploy step instead.
+    db_auto_migrate: bool = False
 
     # ── Row-Level Security (roadmap 2.5) ──
     # Turn on only after src/db/rls/enable.sql was applied to the database
@@ -126,9 +142,9 @@ class Settings(BaseSettings):
         default=5,
         description="Max Postgres connections for the checkpointer pool — keep low, Supabase's pooler caps total connections",
     )
-    
+
     cors_origins: str = Field(
-        default="http://localhost:5173,http://127.0.0.1:5173", 
+        default="http://localhost:5173,http://127.0.0.1:5173",
         description="Comma-separated list of allowed CORS origins"
     )
 
@@ -141,7 +157,7 @@ class Settings(BaseSettings):
     @property
     def get_cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-        
+
     @property
     def llm_context_window_tokens(self) -> int:
         return self.ollama_num_ctx if self.use_ollama else self.hosted_context_window_tokens
@@ -194,23 +210,67 @@ def get_llms():
 
     from langchain_openai import ChatOpenAI
 
-    if settings.nebius_api_key:
-        api_key = settings.nebius_api_key
-        base_url = "https://api.studio.nebius.ai/v1/"
-        nano_model, super_model = settings.nebius_model_nano, settings.nebius_model_super
+    provider = _hosted_provider(settings)
+    openai_kwargs = _hosted_kwargs(settings, provider)
+    llm_nano = ChatOpenAI(model=provider["nano"], **openai_kwargs)
+    llm_super = ChatOpenAI(model=provider["super"], **openai_kwargs)
+    return llm_nano, llm_super
+
+
+def active_models() -> dict:
+    """The model id serving each role right now (shown read-only in Settings)."""
+    settings = get_settings()
+    if settings.use_ollama:
+        provider = "ollama"
+    elif settings.nebius_api_key:
+        provider = "nebius"
     elif settings.openai_api_key:
-        api_key = settings.openai_api_key
-        base_url = None
-        nano_model, super_model = settings.openai_model_nano, settings.openai_model_super
+        provider = "openai"
     else:
-        raise RuntimeError(
-            "NEBIUS_API_KEY or OPENAI_API_KEY is required when USE_OLLAMA=False"
+        return {"provider": "unconfigured", "nano": None, "super": None, "vision": None}
+    return {
+        "provider": provider,
+        "nano": getattr(settings, f"{provider}_model_nano"),
+        "super": getattr(settings, f"{provider}_model_super"),
+        "vision": getattr(settings, f"{provider}_model_vision") if settings.vision_enabled else None,
+    }
+
+
+def get_vision_llm():
+    """The image-reading model (see src/agent/vision.py), same provider switch as get_llms()."""
+    settings = get_settings()
+    if settings.use_ollama:
+        from langchain_ollama import ChatOllama
+
+        return ChatOllama(
+            model=settings.ollama_model_vision, temperature=0.0, num_ctx=settings.ollama_num_ctx,
+            num_predict=settings.llm_max_output_tokens, client_kwargs={"timeout": settings.llm_timeout_seconds},
         )
 
-    openai_kwargs = dict(
-        temperature=0.0, api_key=api_key, base_url=base_url,
+    from langchain_openai import ChatOpenAI
+
+    provider = _hosted_provider(settings)
+    return ChatOpenAI(model=provider["vision"], **_hosted_kwargs(settings, provider))
+
+
+def _hosted_provider(settings: Settings) -> dict:
+    if settings.nebius_api_key:
+        return {
+            "api_key": settings.nebius_api_key, "base_url": "https://api.studio.nebius.ai/v1/",
+            "nano": settings.nebius_model_nano, "super": settings.nebius_model_super,
+            "vision": settings.nebius_model_vision,
+        }
+    if settings.openai_api_key:
+        return {
+            "api_key": settings.openai_api_key, "base_url": None,
+            "nano": settings.openai_model_nano, "super": settings.openai_model_super,
+            "vision": settings.openai_model_vision,
+        }
+    raise RuntimeError("NEBIUS_API_KEY or OPENAI_API_KEY is required when USE_OLLAMA=False")
+
+
+def _hosted_kwargs(settings: Settings, provider: dict) -> dict:
+    return dict(
+        temperature=0.0, api_key=provider["api_key"], base_url=provider["base_url"],
         max_tokens=settings.llm_max_output_tokens, timeout=settings.llm_timeout_seconds,
     )
-    llm_nano = ChatOpenAI(model=nano_model, **openai_kwargs)
-    llm_super = ChatOpenAI(model=super_model, **openai_kwargs)
-    return llm_nano, llm_super
