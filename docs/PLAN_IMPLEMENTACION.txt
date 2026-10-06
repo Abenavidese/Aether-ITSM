@@ -640,6 +640,47 @@ PENDIENTE (requiere 10.0, credenciales reales):
 - 10.11: confirmar que el plan de Vercel permite drains y probar un
   console.error real llegando en < 1 min.
 
+10.3 CONTRA RENDER REAL (2026-10-06): core-ecommerce-api desplegado en
+Render (srv-db2l07ad0e5s73bgft2g, owner tea-d3ksf0l6ubrc738ro4hg, plan free)
+y frontend en Vercel. RenderLogProvider real: /v1/services/{id} y /deploys
+OK (suspended=False, last deploy "live"); /v1/logs OK con labels
+resource/instance/level/type. Hallazgos que el mock no mostraba, ya
+corregidos en render.py (+3 tests):
+- Render guarda CADA linea como un registro aparte y console.error sale con
+  level=info: un stack trace eran 17 registros sueltos, los frames nunca
+  llegaban como "error" y el archivo:linea no se habria extraido. Ahora las
+  lineas de continuacion (indentadas / "}") de la misma instancia en < 1 s
+  se pliegan al registro anterior. Verificado con un 500 real (JSON
+  invalido): 1 evento ERROR de 17 lineas.
+- Codigos de color ANSI en la salida de build/deploy: se eliminan; las
+  lineas en blanco de npm se descartan.
+- type=request devuelve 0 registros en este servicio (plan free / Express
+  sin logger): los 5xx solo se ven si la app hace console.error (el
+  errorHandler del repo de prueba lo hace) o por el healthcheck.
+- Las lineas de build no traen label "instance" y su type es "app" igual
+  que las de runtime (no se distinguen por type).
+- Settings prohibe variables extra: RENDER_API_KEY en .env impide arrancar
+  la app (la key va cifrada por tenant en Company.render_api_key, no en .env).
+10.10 E2E REAL (2026-10-06, POST /api/chat en el uvicorn local + Ollama 8B,
+tenant acme, Render real): con un 500 real provocado (JSON invalido),
+admin "la tienda no carga..." -> "DEGRADADO — 3 entrada(s) de error en los
+logs recientes; el healthcheck respondio HTTP 200" y el modelo cita el
+SyntaxError real. "reinicia el servidor..." -> rechazo de solo lectura +
+ticket. Sin archivo:linea porque ese error vive en node_modules/body-parser
+(se descarta a proposito, no se adivina).
+Hallazgos:
+- La key se habia guardado desde el panel pero monitored_services quedo
+  vacio (sin servicio el chat responde generico sin avisar que no hay nada
+  configurado). Guardado via PUT /tenant/settings.
+- Cada respuesta del chat agrega "Contenido real (GitHub) de
+  frontend/src/api/: client.js" aunque nadie pregunto por el repo: ruido
+  del listado garantizado (pendiente de revisar).
+- acme no tiene usuario employee: la variante sin lineas crudas no se probo
+  en real (si con tests).
+PENDIENTE: probar archivo:linea con un bug en codigo propio del repo de
+prueba; Vercel drain descartado por ahora (requiere plan Pro y el frontend
+es estatico: sin logs de runtime utiles).
+
 
 FASE 11 - SEGURIDAD DEL LLM (hardening previo a code review)
 -----------------------------------------------------------

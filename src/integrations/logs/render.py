@@ -14,6 +14,7 @@ import hashlib
 import logging
 import re
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import httpx
@@ -76,10 +77,26 @@ def _labels(entry: dict) -> dict[str, str]:
     return {str(label.get("name")): str(label.get("value")) for label in labels if isinstance(label, dict)}
 
 
+# Build/deploy output carries terminal colors ("\x1b[34;1m==>\x1b[0;22m"):
+# noise that eats the line budget and splits words the regexes look for.
+_ANSI = re.compile(r"\x1b(?:\[[0-9;?]*[A-Za-z]|\([A-Z0-9])")
+
+# Render stores every output line as its own record (verified against the
+# real API, 2026-10-06): one console.error(err) becomes a "SyntaxError: ..."
+# record plus one record per stack frame, ALL labeled level=info. A line that
+# continues the previous one (indented, or a closing bracket) on the same
+# instance within a second is folded back into it.
+_CONTINUATION = re.compile(r"^(\s|[}\])])")
+_CONTINUATION_WINDOW_SECONDS = 1.0
+
+
 def _to_entry(raw: dict) -> LogEntry | None:
     message = raw.get("message")
     timestamp = _parse_time(raw.get("timestamp"))
     if not isinstance(message, str) or timestamp is None:
+        return None
+    message = _ANSI.sub("", message)
+    if not message.strip():   # npm prints blank lines around its output; they only eat the line budget
         return None
     labels = _labels(raw)
     status = labels.get("statusCode")
@@ -92,6 +109,25 @@ def _to_entry(raw: dict) -> LogEntry | None:
         status_code=status_code,
         request_path=labels.get("path"),
     )
+
+
+def _merge_records(raws: list[dict]) -> list[LogEntry]:
+    """One entry per logged event, oldest first: continuation records are
+    appended to the record they follow, so infer_level sees the "...Error"
+    header and locations_from_logs finds the frames in the same entry."""
+    parsed = [(_labels(raw).get("instance"), entry) for raw in raws if (entry := _to_entry(raw))]
+    parsed.sort(key=lambda pair: pair[1].timestamp)
+    merged: list[tuple[str | None, LogEntry]] = []
+    for instance, entry in parsed:
+        if merged:
+            prev_instance, prev = merged[-1]
+            if (instance == prev_instance and _CONTINUATION.match(entry.message)
+                    and (entry.timestamp - prev.timestamp).total_seconds() <= _CONTINUATION_WINDOW_SECONDS):
+                level = "error" if "error" in (prev.level, entry.level) else prev.level
+                merged[-1] = (instance, replace(prev, message=f"{prev.message}\n{entry.message}", level=level))
+                continue
+        merged.append((instance, entry))
+    return [entry for _, entry in merged]
 
 
 class RenderLogProvider:
@@ -120,18 +156,16 @@ class RenderLogProvider:
         if levels:
             params["level"] = levels
 
-        entries: list[LogEntry] = []
+        raws: list[dict] = []
         for _ in range(_MAX_PAGES):
             data = await self._client.get("/v1/logs", params=params)
-            for raw in (data or {}).get("logs") or []:
-                entry = _to_entry(raw) if isinstance(raw, dict) else None
-                if entry:
-                    entries.append(entry)
-            if len(entries) >= limit or not (data or {}).get("hasMore"):
+            raws += [raw for raw in (data or {}).get("logs") or [] if isinstance(raw, dict)]
+            if len(raws) >= limit or not (data or {}).get("hasMore"):
                 break
             params["startTime"] = data.get("nextStartTime") or params["startTime"]
             params["endTime"] = data.get("nextEndTime") or params["endTime"]
-        return _store(key, entries[:limit])
+        # Newest events first, then cut: `limit` counts events, not raw lines.
+        return _store(key, _merge_records(raws)[::-1][:limit])
 
     async def get_service_state(self, service: ServiceRef) -> ServiceState:
         key = (self._credential_id, "state", service.service_id, int(time.time() // _CACHE_TTL_SECONDS))

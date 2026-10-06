@@ -108,12 +108,58 @@ def test_fetch_logs_parses_entries_and_only_issues_gets():
     provider = RenderLogProvider("rnd_key", transport=rec.transport)
     entries = run(provider.fetch_logs(SERVICE, NOW - timedelta(minutes=30), NOW))
 
-    assert [e.message for e in entries] == ["TypeError: boom", "GET /cart 500"]
-    assert entries[0].level == "error"
-    assert entries[1].status_code == 500 and entries[1].request_path == "/cart"
+    by_message = {e.message: e for e in entries}
+    assert set(by_message) == {"TypeError: boom", "GET /cart 500"}
+    assert by_message["TypeError: boom"].level == "error"
+    assert by_message["GET /cart 500"].status_code == 500 and by_message["GET /cart 500"].request_path == "/cart"
     assert {r.method for r in rec.requests} == {"GET"}
     params = rec.requests[0].url.params
     assert params["ownerId"] == SERVICE.owner_id and params["resource"] == SERVICE.service_id
+
+
+def _real_trace(instance="srv-abc123def456-znw5j", start="2026-09-23T11:55:00.873340"):
+    """Shape of a console.error(err) as the real Render API returns it
+    (2026-10-06): one info-labeled record per line, microseconds apart."""
+    lines = ["TypeError: Cannot read properties of undefined (reading 'sub')",
+             "    at addToCart (/opt/render/project/src/backend/src/controllers/cartController.js:5:31)",
+             "    at /opt/render/project/src/backend/node_modules/express/lib/router/layer.js:95:5",
+             "}"]
+    base = datetime.fromisoformat(start)
+    return [_render_log(line, level="info", ts=(base + timedelta(microseconds=4 * i)).isoformat() + "Z",
+                        instance=instance) for i, line in enumerate(lines)]
+
+
+def test_multiline_stack_trace_is_one_error_entry_with_its_frames():
+    from src.integrations.logs.diagnosis import locations_from_logs
+    rec = Recorder({"/v1/logs": {"hasMore": False, "logs": [
+        _render_log("listening on 10000", level="info", ts="2026-09-23T11:50:00Z", instance="srv-abc123def456-znw5j"),
+        *_real_trace()]}})
+    entries = run(RenderLogProvider("rnd_key", transport=rec.transport).fetch_logs(SERVICE, NOW - timedelta(hours=1), NOW))
+
+    assert len(entries) == 2
+    trace = entries[0]  # newest first
+    assert trace.level == "error" and trace.message.count("\n") == 3
+    tree = [{"path": "backend/src/controllers/cartController.js", "type": "file"}]
+    assert [(loc.repo_path, loc.line) for loc in locations_from_logs(entries, tree)] == [
+        ("backend/src/controllers/cartController.js", 5)]
+
+
+def test_continuations_never_cross_instances_or_the_time_window():
+    other_instance = _render_log("    at x (/app/a.js:1:1)", level="info", ts="2026-09-23T11:55:00.873360Z",
+                                 instance="srv-abc123def456-other")
+    much_later = _render_log("    indented but unrelated", level="info", ts="2026-09-23T11:55:05Z",
+                             instance="srv-abc123def456-znw5j")
+    rec = Recorder({"/v1/logs": {"hasMore": False, "logs": [*_real_trace()[:1], other_instance, much_later]}})
+    entries = run(RenderLogProvider("rnd_key", transport=rec.transport).fetch_logs(SERVICE, NOW - timedelta(hours=1), NOW))
+    assert len(entries) == 3
+
+
+def test_ansi_color_codes_and_blank_lines_are_dropped():
+    rec = Recorder({"/v1/logs": {"hasMore": False, "logs": [
+        _render_log("\x1b[34;1m==>\x1b[0;22m \x1b[1mBuild successful\x1b[22m \x1b(B\x1b[m", level="info"),
+        _render_log("", level="info"), _render_log("\x1b[0m", level="info")]}})
+    entries = run(RenderLogProvider("rnd_key", transport=rec.transport).fetch_logs(SERVICE, NOW - timedelta(hours=1), NOW))
+    assert [e.message for e in entries] == ["==> Build successful "]
 
 
 def test_pagination_is_bounded():
