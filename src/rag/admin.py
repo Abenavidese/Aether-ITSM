@@ -4,6 +4,7 @@ Knowledge-base maintenance commands (Fase 14.1).
     python -m src.rag.admin status
     python -m src.rag.admin migrate-legacy            # dry run: what would be carried over
     python -m src.rag.admin migrate-legacy --apply    # needs the embedding model reachable
+    python -m src.rag.admin migrate-legacy --apply --exclude-tenant <id>   # leave a tenant out
     python -m src.rag.admin reindex [--force]         # queue re-index of stale documents, every tenant
 
 migrate-legacy carries the pre-Fase-14 store (langchain-postgres'
@@ -67,7 +68,7 @@ def rebuild_text(chunks: list[tuple[int, str, str]]) -> str:
     return "\n\n".join(p for p in parts if p).strip()
 
 
-def migrate_legacy(apply: bool) -> None:
+def migrate_legacy(apply: bool, exclude: tuple[str, ...] = ()) -> None:
     from src.db.database import SessionLocal, engine
     from src.db.models import Company, KnowledgeDocument
 
@@ -89,7 +90,8 @@ def migrate_legacy(apply: bool) -> None:
     embeddings, model_id = (get_embeddings(), embedding_model_id()) if apply else (None, None)
     migrated = skipped = 0
     for (tenant_id, filename), doc in sorted(legacy.items()):
-        reason = ("company no longer exists" if tenant_id not in tenants else
+        reason = ("excluded" if tenant_id in exclude else
+                  "company no longer exists" if tenant_id not in tenants else
                   "already in the new store" if (tenant_id, filename) in existing else None)
         if reason:
             print(f"skip  {tenant_id[:8]} {filename}: {reason}")
@@ -151,13 +153,14 @@ def main() -> None:
     sub.add_parser("status")
     m = sub.add_parser("migrate-legacy")
     m.add_argument("--apply", action="store_true")
+    m.add_argument("--exclude-tenant", action="append", default=[], help="tenant id to leave out (repeatable)")
     r = sub.add_parser("reindex")
     r.add_argument("--force", action="store_true")
     args = parser.parse_args()
     if args.command == "status":
         status()
     elif args.command == "migrate-legacy":
-        migrate_legacy(args.apply)
+        migrate_legacy(args.apply, tuple(args.exclude_tenant))
     else:
         reindex_all(args.force)
 

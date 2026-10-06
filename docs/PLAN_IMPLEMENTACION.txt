@@ -1288,7 +1288,20 @@ NO medidos: el tiempo de subida de un PDF de 20 paginas y matar el worker
 a mitad de una indexacion (la garantia viene de la cola generica, probada
 para tickets; el handler es idempotente por (documento, version)).
 
-PENDIENTE (decision del dueno, nada de esto se hizo en Supabase):
+HECHO 2026-09-27 (aprobado por el dueno): en Supabase, respaldo
+~/aether-backups/supabase_pre_rag_migrate_20260927.dump -> migrate
+(0001 estampada -> 0004, `alembic check` limpio) -> apply_rls (las 3 tablas
+nuevas con RLS) -> migrate-legacy --apply --exclude-tenant <tenant del E2E
+accidental> (20 docs, 131 chunks). Verificado: sesion de acme corre como
+aether_tenant y solo ve su tenant, indice HNSW creado, busqueda real
+devuelve pasajes de acme y "menu del comedor" vuelve vacio. Latencia desde
+la laptop: ~550 ms por ida y vuelta a Supabase (busqueda 2-3 s); en Render
+en la misma region deberia bajar. Mejora opcional: una sola sesion para
+denso+keyword+identificador y vecinos en una consulta.
+El tenant del E2E accidental sigue en Supabase (el borrado lo bloqueo el
+clasificador de permisos; lo borra el dueno).
+
+(Historico) PENDIENTE antes de la aprobacion:
 - `python -m src.db.migrate` en Supabase: aplica 0002 (borra las 4
   columnas muertas), 0003 (tablas del RAG) y 0004 (indices faltantes).
   Hasta entonces la app contra Supabase corre sin RAG: retrieve() degrada
