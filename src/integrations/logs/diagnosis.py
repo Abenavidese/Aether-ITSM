@@ -47,6 +47,9 @@ def compute_verdict(health: dict | None, state: ServiceState | None, error_count
             degraded.append(f"el healthcheck respondió HTTP {health['http_status']}")
         elif health.get("available"):
             ok.append(f"el healthcheck respondió HTTP {health.get('http_status')}")
+            if health.get("slow_start"):
+                ok.append("tardó en responder (probable arranque en frío: el plan gratuito duerme el "
+                          "servicio sin tráfico)")
     if state and state.last_deploy_status == "failed":
         degraded.append("el último deploy falló (sigue sirviendo la versión anterior)")
     if error_count:

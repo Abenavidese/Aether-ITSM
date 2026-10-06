@@ -23,6 +23,9 @@ class TurnContext:
     repo_view: RepoView = field(default_factory=RepoView)
     diagnoses: list[ServiceDiagnosis] = field(default_factory=list)
     monitored_services: list[dict] = field(default_factory=list)
+    # An outage was reported but the tenant has no log-enabled service: the
+    # model is told so (no guessing at causes) and the reply says it plainly.
+    outage_without_services: bool = False
 
     def grounding_text(self, user_text: str) -> str:
         """Only fetched data and what the USER wrote count as grounding —

@@ -92,14 +92,25 @@ def check_service_status(service_url: str) -> str:
         return json.dumps({"status": "error", "service_url": service_url, "message": f"URL refused: {e}"})
 
     logger.info("Checking service status for %s", service_url)
+    settings = get_settings()
+    slow_start = False
     try:
-        response = httpx.get(service_url, timeout=5.0, follow_redirects=False)
+        try:
+            response = httpx.get(service_url, timeout=settings.healthcheck_timeout_seconds, follow_redirects=False)
+        except httpx.TimeoutException:
+            # Possibly a sleeping free-tier instance waking up: one longer try
+            # before calling it down. A refused connection is not retried.
+            logger.info("Healthcheck for %s timed out — retrying once for a cold start", service_url)
+            slow_start = True
+            response = httpx.get(service_url, timeout=settings.healthcheck_wake_timeout_seconds,
+                                 follow_redirects=False)
         available = response.status_code < 500
         return json.dumps({
             "status": "success",
             "service_url": service_url,
             "available": available,
             "http_status": response.status_code,
+            **({"slow_start": True} if slow_start else {}),
         })
     except httpx.RequestError as e:
         # A down/unreachable service is an expected, informative outcome for

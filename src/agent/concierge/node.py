@@ -92,6 +92,10 @@ async def _gather_context(state: ConciergeState, mcp_client: MCPToolClient) -> T
     # the *trigger* catches that, while keyword extraction still runs on the
     # current message alone (it already contains "middleware").
     recent_text = " ".join(message_text(m) for m in state["messages"][-3:])
+    # Only the USER's words can ask for a listing: the listing footer this
+    # node appends ("📂 Contenido real...") contains a trigger word itself, so
+    # counting assistant turns re-listed a folder on every later message.
+    recent_user_text = " ".join(message_text(m) for m in state["messages"][-3:] if isinstance(m, HumanMessage))
     turn = TurnContext(user_query=user_query, recent_text=recent_text)
     if not tenant_id:
         return turn
@@ -106,7 +110,7 @@ async def _gather_context(state: ConciergeState, mcp_client: MCPToolClient) -> T
     turn.knowledge_context = turn.knowledge.to_prompt()
 
     wants_code = bool(_CODE_QUESTION_PATTERN.search(user_query))
-    wants_directory = bool(_DIRECTORY_QUESTION_PATTERN.search(recent_text) or _extract_paths(user_query))
+    wants_directory = bool(_DIRECTORY_QUESTION_PATTERN.search(recent_user_text) or _extract_paths(user_query))
     wants_files = bool(_FILENAME_PATTERN.search(user_query.replace("\\", "/")))
 
     if wants_code:
@@ -126,6 +130,7 @@ async def _gather_context(state: ConciergeState, mcp_client: MCPToolClient) -> T
     # verdict + redacted recent errors + the file:line they point to.
     if _OUTAGE_PATTERN.search(user_query):
         targets = _pick_services(await asyncio.to_thread(get_log_services, tenant_id), recent_text)
+        turn.outage_without_services = not targets
         if targets:
             if not turn.repo_tree:
                 turn.repo_tree = await _fetch_repo_tree(tenant_id)
@@ -215,7 +220,8 @@ async def _run_tool(result: ConciergeResult, tool_ctx: ToolCallContext, mcp_clie
     return ""
 
 
-def _apply_fixed_rules(response_text: str, resolved: bool, turn: TurnContext) -> tuple[str, bool]:
+def _apply_fixed_rules(response_text: str, resolved: bool, turn: TurnContext,
+                       can_configure: bool = False) -> tuple[str, bool]:
     """
     Deterministic, whatever the model wrote: no secret reaches the screen,
     the service verdict is stated by code, a DOWN service always becomes a
@@ -230,6 +236,12 @@ def _apply_fixed_rules(response_text: str, resolved: bool, turn: TurnContext) ->
         response_text += "\n\n" + "\n".join(d.verdict_line() for d in turn.diagnoses)
         if any(d.verdict.status == DOWN for d in turn.diagnoses):
             resolved = False
+    elif turn.outage_without_services and can_configure:
+        # Admins only: they can fix it, and the outage pattern is broad
+        # ("my vpn is down") — an employee would just see noise.
+        response_text += ("\n\nℹ️ No hay servicios monitoreados con acceso a logs configurados, así que no pude "
+                          "revisar el estado ni los logs del servidor. Un administrador puede añadirlos en "
+                          "Integraciones.")
     if _SERVER_MUTATION_PATTERN.search(turn.user_query):
         response_text += ("\n\n🔒 No puedo reiniciar, redesplegar ni modificar servidores: mi acceso es de "
                           "solo lectura (estado y logs). Lo derivo al equipo de ingeniería con un ticket.")
@@ -268,7 +280,8 @@ async def concierge_node(state: ConciergeState, config: RunnableConfig) -> dict:
     if tool_text:
         response_text = f"{response_text}\n\n{tool_text}"
 
-    response_text, resolved = _apply_fixed_rules(response_text, result.resolved, turn)
+    response_text, resolved = _apply_fixed_rules(response_text, result.resolved, turn,
+                                                 can_configure=user_context.get("role") in RAW_LOG_ROLES)
     passages = turn.knowledge.passages if turn.knowledge else []
     citations = validate_citations(response_text, passages, declared=result.cited_passages, question=turn.user_query)
     if citations.removed:

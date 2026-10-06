@@ -19,7 +19,11 @@ def build_system_prompt(turn: TurnContext, tool_catalog: str) -> str:
     diagnosis = (
         "Service diagnosis (computed by code from real platform data — the status is "
         f"authoritative, don't contradict it):\n{turn.diagnosis_context}\n"
-        if turn.diagnosis_context else ""
+        if turn.diagnosis_context else
+        "Service diagnosis: NOT AVAILABLE — this company has no monitored service with log access "
+        "configured, so you have NO data about the server's state or errors. Say that plainly; do not "
+        "guess causes or name files as likely culprits.\n"
+        if turn.outage_without_services else ""
     )
     return f"""
     You are Aether Concierge, the first line of IT support chat for employees.

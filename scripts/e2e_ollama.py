@@ -26,7 +26,8 @@ Preconditions:
        "llama3.1" (== "llama3.1:latest"), either `ollama pull llama3.1` or set
        OLLAMA_MODEL=llama3.1:8b in your .env to match what's actually pulled.
     3. DATABASE_URL in .env pointing at a reachable Postgres (pgvector) instance
-       — the same one the running server uses.
+       — the same one the running server uses. It must be LOCAL: the script
+       refuses a remote DB unless E2E_ALLOW_REMOTE_DB=1 (it never cleans up).
 
 Usage (from the project root, so `src` is importable and `.env` is found):
     python scripts/e2e_ollama.py
@@ -44,6 +45,31 @@ sys.path.insert(0, PROJECT_ROOT)
 
 BASE_URL = os.environ.get("AETHER_BASE_URL", "http://127.0.0.1:8000/api")
 PASSWORD = "E2ETestPassw0rd!"
+
+
+_LOCAL_DB_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+
+
+def database_is_local(database_url: str) -> bool:
+    """SQLite or a Postgres on this machine. Anything else (Supabase, Neon...)
+    is somebody's real data."""
+    from urllib.parse import urlsplit
+    if database_url.startswith("sqlite"):
+        return True
+    return (urlsplit(database_url).hostname or "") in _LOCAL_DB_HOSTS
+
+
+def refuse_remote_database() -> None:
+    """Every run registers a new company with users, tickets and documents,
+    and nothing deletes them — one run against Supabase left a stray
+    "Vertex E2E" tenant in production data. Remote DBs need an explicit opt-in."""
+    from src.config import get_settings
+    if database_is_local(get_settings().database_url) or os.environ.get("E2E_ALLOW_REMOTE_DB") == "1":
+        return
+    print("[FAIL] DATABASE_URL apunta a una base remota: este script crea una empresa nueva con usuarios y "
+          "tickets que nunca se borran. Usa una base local (docker aether-rag-pg / SQLite) o, si de verdad "
+          "quieres escribir ahí, exporta E2E_ALLOW_REMOTE_DB=1.")
+    raise SystemExit(2)
 
 
 def check(label: str, condition: bool, detail: str = ""):
@@ -164,6 +190,7 @@ def check_tenant_rag_isolation(suffix: str):
 
 
 def main():
+    refuse_remote_database()
     print("=== Fase 1: preflight de Ollama ===")
     preflight_ollama()
 

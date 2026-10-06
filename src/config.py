@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     # a self-hosted deployment that must monitor intranet services; cloud
     # metadata / link-local addresses stay blocked either way.
     allow_private_healthcheck_targets: bool = False
+    # A healthcheck that times out is retried once with the longer timeout:
+    # free-tier hosts (Render free) sleep when idle and take ~50 s to wake,
+    # and a sleeping service must not be reported DOWN (DOWN always opens a ticket).
+    healthcheck_timeout_seconds: float = 5.0
+    healthcheck_wake_timeout_seconds: float = 60.0
 
     # ── Platform logs (Fase 10) ──
     # Vercel drain lines are kept only this long (purged on each ingest).
@@ -183,6 +188,9 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
+        # A rejected setting must not print its value: an unknown key in .env
+        # (e.g. a stray API key) used to land verbatim in the startup traceback.
+        "hide_input_in_errors": True,
     }
 
 
