@@ -36,6 +36,7 @@ async def run_chat_turn(checkpointer, mcp_client, user: User, message: str, imag
             "role": user.role, "user_id": user.id,
         },
         "diagnosis_report": None,
+        "incident": None,
         "sources": None,  # a previous turn's sources must not carry over
     }
     async with trace_scope(f"chat:{uuid.uuid4().hex}", "chat", user.company_id):
@@ -59,10 +60,13 @@ async def run_chat_turn(checkpointer, mcp_client, user: User, message: str, imag
         description = f"{message_text}\n\n--- Diagnóstico automático (Aether) ---\n{values['diagnosis_report']}"
     external_id = await asyncio.to_thread(
         tickets.open_chat_ticket, user.id, f"chat-{uuid.uuid4().hex[:10]}", message[:120], description,
+        values.get("incident"),
     )
     if external_id is None:
         return {
             "reply": f"{reply}\n\n(Your organization has reached its monthly ticket limit — please contact an admin.)",
             "status": "resolved", "sources": sources,
         }
+    # Fase 16: the user is told where the follow-up will appear.
+    reply = (f"{reply}\n\n📨 Abrí el ticket {external_id}. Te avisaré en Notificaciones cada vez que avance.")
     return {"reply": reply, "status": "investigating", "ticket_external_id": external_id, "sources": sources}

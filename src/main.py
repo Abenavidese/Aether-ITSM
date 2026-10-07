@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from src.agents.runtime.checkpointer import open_checkpointer
-from src.api.routers import auth, chat, integrations, knowledge, observability, tenant, tickets, users
+from src.api.routers import auth, chat, integrations, knowledge, notifications, observability, tenant, tickets, users
 from src.core.config import get_settings
 from src.db import tenant_scope  # noqa: F401 — registers the RLS session listener (roadmap 2.5)
 from src.db.database import engine
@@ -31,7 +31,7 @@ settings = get_settings()
 configure_logging(settings.log_format)
 logger = logging.getLogger(__name__)
 
-ROUTERS = (tickets, chat, auth, tenant, users, knowledge, integrations, observability)
+ROUTERS = (tickets, chat, auth, tenant, users, knowledge, integrations, observability, notifications)
 
 
 @asynccontextmanager

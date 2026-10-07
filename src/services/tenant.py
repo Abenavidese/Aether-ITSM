@@ -92,6 +92,7 @@ def tenant_settings(db: Session, user: User) -> dict:
         "monitored_services": json.loads(company.monitored_services) if company.monitored_services else [],
         "render_api_key": "MASKED" if company.render_api_key else "",
         "vercel_drain_secret": "MASKED" if company.vercel_drain_secret else "",
+        "code_fix_prs_enabled": bool(company.code_fix_prs_enabled),
         # Relative to the API base; the frontend prefixes its own API URL.
         "vercel_drain_path": f"/integrations/vercel/drain/{company.id}",
     }
@@ -111,6 +112,8 @@ def update_settings(db: Session, user: User, changes: dict) -> None:
         user.full_name = changes["user_full_name"]
     if "monitored_services" in changes:
         company.monitored_services = json.dumps(changes["monitored_services"])
+    if "code_fix_prs_enabled" in changes:
+        company.code_fix_prs_enabled = bool(changes["code_fix_prs_enabled"])
     _set_write_only_secret(company, "render_api_key", changes.get("render_api_key"))
     _set_write_only_secret(company, "vercel_drain_secret", changes.get("vercel_drain_secret"))
 
@@ -228,6 +231,7 @@ def dashboard_metrics(db: Session, company_id: str) -> dict:
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "resolution_path": t.resolution_path,
         "github_issue_url": t.github_issue_url,
+        "fix_pr_url": t.fix_pr_url,
         "proposed_plan": t.proposed_plan,
     } for t in recent_tickets]
 
@@ -262,4 +266,5 @@ def ticket_by_external_id(db: Session, company_id: str, external_id: str) -> dic
         "estimated_time_saved_minutes": ticket.estimated_time_saved_minutes,
         "cost_saved_usd": ticket.cost_saved_usd,
         "github_issue_url": ticket.github_issue_url,
+        "fix_pr_url": ticket.fix_pr_url,
     }

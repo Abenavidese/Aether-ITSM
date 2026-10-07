@@ -123,6 +123,25 @@ def test_disabled_flag_keeps_the_app_role(pg, two_tenants):
         assert {t.tenant_id for t in db.query(models.Ticket).all()} >= {a, b}
 
 
+
+def test_notifications_are_tenant_isolated(pg, two_tenants):
+    """Fase 16: a requester's notifications stay inside their tenant."""
+    _, factory = pg
+    a, b = two_tenants
+    with factory() as db:
+        for tenant in (a, b):
+            ticket = db.query(models.Ticket).filter(models.Ticket.tenant_id == tenant).first()
+            db.add(models.Notification(tenant_id=tenant, user_id=ticket.user_id, ticket_id=ticket.id,
+                                       kind="ticket_opened", title="t", body="b"))
+        db.commit()
+    with tenant_session(a, session_factory=factory, rls=True) as db:
+        assert {n.tenant_id for n in db.query(models.Notification).all()} == {a}   # no WHERE tenant_id!
+        user_id = db.query(models.User).first().id
+        db.add(models.Notification(tenant_id=b, user_id=user_id, kind="x", title="x", body="x"))
+        with pytest.raises(DBAPIError, match="row-level security"):
+            db.flush()
+        db.rollback()
+
 # ── Fase 14: the knowledge store searches inside RLS ─────────────────────────
 
 def _store(factory):

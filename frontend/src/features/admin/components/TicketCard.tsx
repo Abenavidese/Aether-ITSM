@@ -5,6 +5,8 @@ import type { DashboardTicket } from "../types";
 interface TicketCardProps {
   ticket: DashboardTicket;
   isActive?: boolean;
+  // Fase 16: an engineer closes an escalated ticket; the requester is notified.
+  onResolve?: (externalId: string) => void;
 }
 
 const STATUS_STYLE: Record<DashboardTicket["status"], string> = {
@@ -21,7 +23,7 @@ const STATUS_ICON: Record<DashboardTicket["status"], ReactElement> = {
   escalated: <GitPullRequestArrow size={16} />,
 };
 
-export function TicketCard({ ticket, isActive = false }: TicketCardProps) {
+export function TicketCard({ ticket, isActive = false, onResolve }: TicketCardProps) {
   const statusClass = STATUS_STYLE[ticket.status] ?? STATUS_STYLE.open;
   const statusIcon = STATUS_ICON[ticket.status] ?? STATUS_ICON.open;
 
@@ -61,6 +63,25 @@ export function TicketCard({ ticket, isActive = false }: TicketCardProps) {
         >
           View GitHub issue
         </a>
+      )}
+      {ticket.fix_pr_url && (
+        <a
+          href={ticket.fix_pr_url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 ml-3 inline-block text-xs text-emerald-400 hover:text-emerald-300 underline"
+        >
+          Review proposed fix (PR)
+        </a>
+      )}
+      {onResolve && ticket.external_id && ticket.status === "escalated" && (
+        <button
+          type="button"
+          onClick={() => onResolve(ticket.external_id as string)}
+          className="mt-2 ml-3 text-xs text-slate-300 hover:text-white border border-slate-600 rounded px-2 py-0.5"
+        >
+          Mark resolved
+        </button>
       )}
     </div>
   );

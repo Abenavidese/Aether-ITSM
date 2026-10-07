@@ -133,11 +133,20 @@ class _FakeStructuredLLM:
     tests exercise the real HTTP/graph/DB path without a live Ollama."""
     def __init__(self, result):
         self._result = result
+        self._schema = None
 
     def with_structured_output(self, schema, include_raw=True):
-        return self
+        # Answers only the schema it was scripted for: any other structured
+        # call (the Concierge's supervisor, Fase 16) fails like a model that
+        # is down, so it falls back to the deterministic floor.
+        bound = type(self).__new__(type(self))
+        bound.__dict__ = self.__dict__
+        bound._schema = schema
+        return bound
 
     async def ainvoke(self, messages):
+        if self._schema is not None and not isinstance(self._result, self._schema):
+            raise LookupError(f"no scripted {self._schema.__name__} result")
         return {"parsed": self._result, "parsing_error": None}
 
 
@@ -289,8 +298,9 @@ class _RecordingLLM(_FakeStructuredLLM):
         self.prompts: list[str] = []
 
     async def ainvoke(self, messages):
+        result = await super().ainvoke(messages)   # only answered calls are recorded
         self.prompts.append("\n".join(str(m.content) for m in messages))
-        return await super().ainvoke(messages)
+        return result
 
 
 def _render_transport(requests: list, suspended: bool = False):

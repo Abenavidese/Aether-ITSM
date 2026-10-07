@@ -22,7 +22,7 @@ from src.agents.ticket_flow.runner import awaiting_approval, ticket_graph
 from src.observability.tracing import trace_scope
 from src.services.tickets import is_escalated
 
-from .metrics import ChatResult, TicketResult
+from .metrics import ChatResult, DiagnosisResult, TicketResult
 
 EVAL_TENANT = "eval-tenant"
 EVAL_REQUESTER = "eval.requester@example.com"
@@ -104,6 +104,61 @@ async def run_chat_case(case: dict, mcp_client) -> ChatResult:
     result.latency_ms = int((time.perf_counter() - started) * 1000)
     result.reply = values.get("final_response", "")
     result.resolved = values.get("resolved")
+    result.investigations = values.get("investigations") or []
     result.tool_calls = spy.calls
     result.input_tokens, result.output_tokens = trace.llm_tokens()
     return result
+
+
+async def run_diagnosis_case(case: dict, mcp_client) -> DiagnosisResult:
+    """
+    Fase 16.2: one conversation against the fixture tenant (diagnosis_world):
+    real read path, fake GitHub/Render over HTTP. Turns run in order on one
+    thread; the expectations score the LAST turn (where the problem is
+    finally stated), the safety metrics every turn.
+    """
+    from unittest.mock import patch
+
+    from .diagnosis_world import CANARY_SECRET, FixtureTools, diagnosis_world
+
+    result = DiagnosisResult(case["id"], case.get("tags", []), case["expected"])
+    spy = RecordingMCPClient(FixtureTools(mcp_client, case.get("scenario")))
+    app = get_concierge_workflow().compile(checkpointer=MemorySaver())
+    config = {"configurable": {"thread_id": f"eval-diag:{case['id']}:{uuid.uuid4().hex[:6]}", "mcp_client": spy}}
+    user_context = {"email": EVAL_REQUESTER, "tenant_id": EVAL_TENANT, "role": case.get("role", "employee"),
+                    "user_id": None}
+    started = time.perf_counter()
+    try:
+        with diagnosis_world(case.get("scenario"), services=case.get("services", True),
+                             repo=case.get("repo", True)) as world, \
+                patch("src.agents.concierge.node.retrieve", _empty_retrieval):
+            async with trace_scope(f"eval-diag:{case['id']}", "eval", None, persist=False) as trace:
+                for text in case["turns"]:
+                    turn_started = time.perf_counter()
+                    state = {"messages": [HumanMessage(content=text)], "diagnosis_report": None,
+                             "sources": None, "user_context": user_context}
+                    async for _ in app.astream(state, config=config):
+                        pass
+                    values = (await app.aget_state(config)).values
+                    result.turn_latencies_ms.append(int((time.perf_counter() - turn_started) * 1000))
+                    result.all_investigations += values.get("investigations") or []
+    except Exception as e:
+        result.error = f"{type(e).__name__}: {e}"
+        return result
+    result.latency_ms = int((time.perf_counter() - started) * 1000)
+    result.reply = values.get("final_response", "")
+    result.resolved = values.get("resolved")
+    result.investigations = values.get("investigations") or []
+    result.diagnosis_report = values.get("diagnosis_report") or ""
+    result.tool_calls = spy.calls
+    result.world = world.to_dict()
+    result.leaked_secret = CANARY_SECRET in result.reply
+    result.input_tokens, result.output_tokens = trace.llm_tokens()
+    return result
+
+
+def _empty_retrieval(*args, **kwargs):
+    """The diagnosis suite measures investigation, not RAG: the knowledge base is empty."""
+    from src.rag.query import QueryPlan
+    from src.rag.retrieval import RetrievalResult
+    return RetrievalResult(plan=QueryPlan(original="", semantic="", terms=[], entities=[]))

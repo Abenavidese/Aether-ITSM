@@ -44,8 +44,13 @@ class ServiceDiagnosis:
         parts = [f"Service '{self.service.name}' — deterministic status: {self.verdict.status}",
                  "Evidence: " + "; ".join(self.verdict.evidence)]
         if self.locations:
-            parts.append("Code locations from the error stack traces: "
-                         + ", ".join(f"{loc.repo_path}:{loc.line}" for loc in self.locations))
+            top, callers = self.locations[0], self.locations[1:]
+            parts.append(f"Failing line (top of the error's stack trace): {top.repo_path}:{top.line}")
+            if callers:
+                # Seen live (Fase 16.9): given a flat list, the 8B model called
+                # every frame "a problem"; callers only passed the error along.
+                parts.append("Called from (these frames only passed the error along, they are not the bug): "
+                             + ", ".join(f"{loc.repo_path}:{loc.line}" for loc in callers))
         if self.notes:
             parts.append("Notes: " + "; ".join(self.notes))
         if include_raw_logs and self.log_lines:

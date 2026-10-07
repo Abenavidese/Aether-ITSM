@@ -125,6 +125,23 @@ class Settings(BaseSettings):
     # Upper bound for one drain delivery; larger bodies are rejected (413).
     platform_log_max_body_bytes: int = 5_000_000
 
+    # ── Concierge supervisor (Fase 16, src/agents/concierge/) ──
+    # A model picks which READ-ONLY checks a chat turn runs (platform logs,
+    # code search, repo layout); deterministic rules stay as the floor.
+    # Chosen with the diagnosis eval (evals.run --suite diagnosis).
+    concierge_supervisor_enabled: bool = True
+    concierge_supervisor_model: str = Field(default="super", pattern="^(nano|super)$")
+    # A second round ("follow the lead") only while the turn is under budget.
+    concierge_investigation_budget_seconds: float = 25.0
+    concierge_max_rounds: int = Field(default=2, ge=1, le=2)
+
+    # ── Code-fix proposals (Fase 16) ──
+    # Global switch; each tenant also opts in (Company.code_fix_prs_enabled).
+    # A proposal is a DRAFT pull request on a new aether/* branch — never a
+    # merge, never the default branch, never the hosting platform.
+    code_fix_prs_enabled: bool = True
+    code_fix_max_changed_lines: int = 20
+
     # ── RAG (Fase 14, src/rag/retrieval.py) ──
     # Every value here was chosen with the retrieval eval (evals/rag) — re-run
     # it before changing one, and after switching the embedding model.

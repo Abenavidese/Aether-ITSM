@@ -22,13 +22,33 @@ class ScriptedLLM:
                        "total_tokens": input_tokens + output_tokens}
 
     def with_structured_output(self, schema, include_raw=True):
-        return self
+        return _BoundScriptedLLM(self, schema)
 
-    async def ainvoke(self, messages):
+    async def _answer(self, schema, messages):
+        # Results are scripted per output schema: a call for a schema the
+        # script has nothing for fails like a model that is down (e.g. the
+        # Concierge's supervisor in a test that only scripts the answer), and
+        # leaves no trace in `prompts`.
+        matching = [r for r in self._results if schema is None or isinstance(r, schema)]
+        if not matching:
+            raise LookupError(f"ScriptedLLM has no scripted {getattr(schema, '__name__', schema)} result")
         self.prompts.append("\n".join(str(m.content) for m in messages))
-        result = self._results.pop(0) if len(self._results) > 1 else self._results[0]
+        result = matching[0]
+        if len(matching) > 1:
+            self._results.remove(result)
         return {"parsed": result, "parsing_error": None,
                 "raw": AIMessage(content="", usage_metadata=self._usage)}
+
+    async def ainvoke(self, messages):
+        return await self._answer(None, messages)
+
+
+class _BoundScriptedLLM:
+    def __init__(self, llm: ScriptedLLM, schema):
+        self._llm, self._schema = llm, schema
+
+    async def ainvoke(self, messages):
+        return await self._llm._answer(self._schema, messages)
 
 
 class RecordingMCP:

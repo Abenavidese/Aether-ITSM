@@ -96,6 +96,8 @@ class UpdateSettingsPayload(BaseModel):
     # value. An empty string clears it.
     render_api_key: Optional[str] = None
     vercel_drain_secret: Optional[str] = None
+    # Fase 16: opt in to draft fix pull requests for diagnosed incidents.
+    code_fix_prs_enabled: Optional[bool] = None
 
     _validate_repo = field_validator("github_repo")(_validate_github_repo)
 
@@ -115,3 +117,16 @@ class UpdateSettingsPayload(BaseModel):
         if self.monitored_services is not None:
             data["monitored_services"] = [s.model_dump(exclude_none=True) for s in self.monitored_services]
         return data
+
+
+class ResolveTicketPayload(BaseModel):
+    # Shown to the requester in their notification: plain words, bounded.
+    note: Optional[str] = None
+
+    @field_validator("note")
+    @classmethod
+    def _bounded_note(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip()
+        if len(v) > 500:
+            raise ValueError("note must be at most 500 characters")
+        return v or None

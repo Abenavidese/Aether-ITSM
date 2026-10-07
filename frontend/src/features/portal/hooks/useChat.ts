@@ -1,10 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Message, Source } from '../components/ChatBubble';
+import type { AppNotification } from './useNotifications';
 import { config } from '../../../config';
 import { apiErrorMessage } from '../../../utils/apiError';
-
-const POLL_INTERVAL_MS = 5000;
-const POLL_MAX_ATTEMPTS = 12; // ~1 minute
 
 export function useChat() {
   const [input, setInput] = useState("");
@@ -13,6 +11,8 @@ export function useChat() {
     { id: '1', sender: 'agent', text: "Hello! I'm Aether, your IT Concierge. How can I help you today?" }
   ]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Tickets this conversation opened: their notifications are posted here too.
+  const openedTickets = useRef<Set<string>>(new Set());
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -26,33 +26,15 @@ export function useChat() {
     setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, sender: 'agent', text, sources }]);
   };
 
-  const pollTicketUntilSettled = async (externalId: string) => {
-    for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
-      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-      try {
-        const res = await fetch(`${config.API_BASE_URL}/tenant/tickets/${externalId}`, {
-          credentials: 'include'
-        });
-        if (!res.ok) continue;
-        const data = await res.json();
-
-        if (data.status === 'resolved') {
-          appendAgentMessage("Update: your request has been resolved.");
-          return;
-        }
-        if (data.status === 'escalated') {
-          appendAgentMessage(
-            data.github_issue_url
-              ? `Update: this was escalated to engineering. Tracking issue: ${data.github_issue_url}`
-              : "Update: this was escalated to our engineering team."
-          );
-          return;
-        }
-      } catch {
-        // Transient network error — keep polling until POLL_MAX_ATTEMPTS.
-      }
+  // Fase 16: ticket progress arrives as notifications (the same ones the bell
+  // shows), instead of polling the ticket itself — which also exposed the
+  // engineering repo's issue URL to employees.
+  const onNotification = useCallback((n: AppNotification) => {
+    if (n.kind === 'ticket_opened') return;  // the chat reply already said so
+    if (n.ticket_external_id && openedTickets.current.has(n.ticket_external_id)) {
+      setMessages(prev => [...prev, { id: `n-${n.id}`, sender: 'agent', text: `🔔 ${n.title}\n\n${n.body}` }]);
     }
-  };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,7 +73,7 @@ export function useChat() {
       appendAgentMessage(data.reply, data.sources);
 
       if (data.status === 'investigating' && data.ticket_external_id) {
-        pollTicketUntilSettled(data.ticket_external_id);
+        openedTickets.current.add(data.ticket_external_id);
       }
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== thinkingId));
@@ -107,5 +89,6 @@ export function useChat() {
     messages,
     messagesEndRef,
     handleSubmit,
+    onNotification,
   };
 }

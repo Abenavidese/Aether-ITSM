@@ -21,11 +21,26 @@ from pathlib import Path
 from src.core.config import get_settings
 from src.tools.mcp_client import MCPToolClient
 
-from .harness import load_cases, run_chat_case, run_ticket_case
-from .metrics import chat_checks, check_thresholds, route_ok, summarize_chats, summarize_tickets, tool_ok, unsafe_calls
+from .diagnosis_world import SERVICE
+from .harness import load_cases, run_chat_case, run_diagnosis_case, run_ticket_case
+from .metrics import (
+    chat_checks,
+    check_thresholds,
+    diagnosis_checks,
+    route_ok,
+    summarize_chats,
+    summarize_diagnosis,
+    summarize_tickets,
+    tool_ok,
+    unsafe_calls,
+)
+
+RUNNERS = {"tickets": run_ticket_case, "concierge": run_chat_case, "diagnosis": run_diagnosis_case}
 
 ROOT = Path(__file__).resolve().parent
-DATASETS = {"tickets": ROOT / "datasets" / "tickets.jsonl", "concierge": ROOT / "datasets" / "concierge.jsonl"}
+DATASETS = {"tickets": ROOT / "datasets" / "tickets.jsonl", "concierge": ROOT / "datasets" / "concierge.jsonl",
+            "diagnosis": ROOT / "datasets" / "diagnosis.jsonl"}
+SUITES = list(DATASETS)
 
 
 def _git_sha() -> str:
@@ -47,14 +62,19 @@ def _models() -> dict:
 
 async def run_suite(suite: str, mcp_client, limit: int | None = None, progress=print) -> dict:
     cases = load_cases(DATASETS[suite])[:limit]
-    runner = run_ticket_case if suite == "tickets" else run_chat_case
+    runner = RUNNERS[suite]
     results = []
     for i, case in enumerate(cases, start=1):
         result = await runner(case, mcp_client)
         results.append(result)
         progress(f"[{i}/{len(cases)}] {case['id']}: " + (f"ERROR {result.error}" if result.error else
                  f"{result.latency_ms} ms"))
-    summary = summarize_tickets(results) if suite == "tickets" else summarize_chats(results)
+    if suite == "tickets":
+        summary = summarize_tickets(results)
+    elif suite == "diagnosis":
+        summary = summarize_diagnosis(results, configured_resources={SERVICE.service_id})
+    else:
+        summary = summarize_chats(results)
     return {"suite": suite, "summary": summary, "results": [r.to_dict() for r in results]}
 
 
@@ -82,6 +102,24 @@ def _chat_rows(results: list[dict]) -> list[str]:
     return rows
 
 
+def _diagnosis_rows(results: list[dict]) -> list[str]:
+    from .metrics import DiagnosisResult
+    rows = ["| case | looked at (last turn) | resolved | failed checks | ms |", "|---|---|---|---|---|"]
+    for raw in results:
+        r = DiagnosisResult(**{**raw, "tool_calls": [tuple(c) for c in raw["tool_calls"]]})
+        if r.error:
+            rows.append(f"| {r.case_id} | ERROR | | {r.error[:60]} | |")
+            continue
+        looked = ", ".join(f"{i['kind']}({i['trigger']})" for i in r.investigations if i["kind"] != "knowledge")
+        failed = [k for k, ok in diagnosis_checks(r).items() if not ok]
+        rows.append(f"| {r.case_id} | {looked or '—'} | {r.resolved} | {', '.join(failed) or '✅'} | "
+                    f"{'/'.join(map(str, r.turn_latencies_ms))} |")
+    return rows
+
+
+_ROWS = {"tickets": _ticket_rows, "concierge": _chat_rows, "diagnosis": _diagnosis_rows}
+
+
 def render_markdown(report: dict) -> str:
     lines = [f"# Eval report — {report['suite']}", "",
              f"- Date: {report['created_at']}", f"- Commit: `{report['git_sha']}`",
@@ -91,7 +129,7 @@ def render_markdown(report: dict) -> str:
         lines += ["", "## Thresholds", ""]
         lines += [f"- ❌ {f}" for f in report["threshold_failures"]] or ["- ✅ all thresholds met"]
     lines += ["", "## Cases", ""]
-    lines += _ticket_rows(report["results"]) if report["suite"] == "tickets" else _chat_rows(report["results"])
+    lines += _ROWS[report["suite"]](report["results"])
     return "\n".join(lines) + "\n"
 
 
@@ -105,7 +143,7 @@ def _parse_thresholds(items: list[str]) -> dict[str, float]:
 
 async def _main(args) -> int:
     thresholds = _parse_thresholds(args.fail_under)
-    suites = ["tickets", "concierge"] if args.suite == "all" else [args.suite]
+    suites = SUITES if args.suite == "all" else [args.suite]
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -132,7 +170,7 @@ async def _main(args) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Aether LLM evals")
-    parser.add_argument("--suite", choices=["tickets", "concierge", "all"], default="all")
+    parser.add_argument("--suite", choices=[*SUITES, "all"], default="all")
     parser.add_argument("--limit", type=int, default=None, help="run only the first N cases of each suite")
     parser.add_argument("--fail-under", action="append", default=[], metavar="METRIC=VALUE",
                         help="e.g. route_accuracy=0.8 or unsafe_actions_max=0 (repeatable)")

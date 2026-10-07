@@ -3,11 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_current_user, get_tenant_db, require_admin
-from src.api.schemas.tenant import OnboardingPayload, UpdateSettingsPayload
+from src.api.schemas.tenant import OnboardingPayload, ResolveTicketPayload, UpdateSettingsPayload
 from src.db.database import get_db
 from src.db.models import User
 from src.security.cookies import set_auth_cookie
 from src.services import tenant as service
+from src.services import tickets as tickets_service
 from src.services.auth import session_token
 
 router = APIRouter(prefix="/tenant", tags=["tenant"])
@@ -98,3 +99,17 @@ def get_ticket_by_external_id(external_id: str, db: Session = Depends(get_tenant
     if ticket is None:
         raise HTTPException(status_code=404, detail="Ticket not found.")
     return ticket
+
+
+@router.post("/tickets/{external_id}/resolve")
+def resolve_ticket(external_id: str, payload: ResolveTicketPayload, current_user: User = Depends(get_current_user)):
+    """
+    Fase 16: an engineer closes a ticket (e.g. after merging and deploying
+    the proposed fix). The requester gets a "resolved" notification.
+    """
+    require_admin(current_user)
+    try:
+        tickets_service.resolve_by_human(current_user.company_id, external_id, payload.note)
+    except tickets_service.TicketNotFound:
+        raise HTTPException(status_code=404, detail="Ticket not found.") from None
+    return {"status": "resolved"}

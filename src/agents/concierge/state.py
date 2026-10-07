@@ -51,3 +51,15 @@ class ConciergeState(TypedDict):
     # Fase 14.5: knowledge-base passages the answer actually cites (validated
     # by src/rag/citations.py), shown to the user as the answer's sources.
     sources: Optional[list]
+    # Fase 16.1: what this turn looked at and why (kind, target, trigger, ms,
+    # ok, found) — small dicts, never the evidence itself, so the checkpoint
+    # stays light.
+    investigations: Optional[list]
+    # Fase 16.6: the graph's per-turn bookkeeping. turn_id keys the in-process
+    # evidence workspace (node.py); the evidence itself is never checkpointed.
+    turn_id: Optional[str]
+    investigation_round: Optional[int]
+    # Fase 16: a failing service found this turn (structured, set by code) —
+    # the ticket stores it so the ticket flow and the fix proposal never
+    # parse it back out of text a user could have written.
+    incident: Optional[dict]

@@ -182,3 +182,90 @@ async def create_issue(repo: str, token: str, title: str, body: str) -> str:
         raise RuntimeError(f"GitHub issue creation failed ({response.status_code}): {message}")
 
     return response.json()["html_url"]
+
+
+# ── Fase 16: draft pull requests with a proposed fix ─────────────────────────
+#
+# The only write path to a repository besides issues. Guard rails live HERE,
+# at the one choke point, not in the caller:
+# - only branches named aether/fix-*, created fresh from the default branch;
+# - the default branch is never written, and nothing is ever merged;
+# - credential files and CI configuration (.github/) are never written;
+# - the pull request is always a draft, for a human to review.
+
+_FIX_BRANCH = re.compile(r"^aether/fix-[a-z0-9][a-z0-9-]{0,60}$")
+_NEVER_WRITE_PREFIXES = (".github/",)
+
+
+class UnsafeRepoWrite(Exception):
+    """A write the guard rails above refuse — raised before any request."""
+
+
+def _check_fix_write(branch: str, path: str) -> None:
+    if not _FIX_BRANCH.match(branch):
+        raise UnsafeRepoWrite(f"branch {branch!r} is not an aether/fix-* branch")
+    normalized = path.replace("\\", "/").lstrip("/")
+    if is_sensitive_path(normalized) or normalized.startswith(_NEVER_WRITE_PREFIXES) or ".." in normalized.split("/"):
+        raise UnsafeRepoWrite(f"'{path}' is never written by the agent")
+
+
+async def _github(client: httpx.AsyncClient, method: str, url: str, token: str, expected: tuple[int, ...],
+                  **kwargs) -> httpx.Response:
+    response = await client.request(method, f"{GITHUB_API_BASE}{url}", headers=_headers(token), **kwargs)
+    if response.status_code not in expected:
+        try:
+            message = response.json().get("message", response.text)
+        except ValueError:
+            message = response.text
+        raise RuntimeError(f"GitHub {method} {url.split('?')[0]} failed ({response.status_code}): {message}")
+    return response
+
+
+async def create_fix_pull_request(repo: str, token: str, branch: str, path: str, new_content: str,
+                                  commit_message: str, title: str, body: str) -> str:
+    """
+    Commits `new_content` to `path` on a NEW branch `branch` (from the
+    default branch's head) and opens a DRAFT pull request. Idempotent: if
+    the branch already has an open pull request, returns its URL.
+    """
+    import base64
+
+    _check_fix_write(branch, path)
+    owner = repo.split("/", 1)[0]
+    async with httpx.AsyncClient(timeout=30) as client:
+        info = (await _github(client, "GET", f"/repos/{repo}", token, (200,))).json()
+        default_branch = info.get("default_branch", "main")
+        if branch == default_branch:
+            raise UnsafeRepoWrite("the default branch is never written")
+
+        existing = (await _github(client, "GET", f"/repos/{repo}/pulls", token, (200,),
+                                  params={"head": f"{owner}:{branch}", "state": "open"})).json()
+        if existing:
+            return existing[0]["html_url"]
+
+        head = (await _github(client, "GET", f"/repos/{repo}/git/ref/heads/{default_branch}", token, (200,))).json()
+        created = await _github(client, "POST", f"/repos/{repo}/git/refs", token, (201, 422),
+                                json={"ref": f"refs/heads/{branch}", "sha": head["object"]["sha"]})
+        if created.status_code == 422:
+            # The branch exists without an open PR (a retried job): only reuse
+            # it if it is still exactly the default branch's head.
+            current = (await _github(client, "GET", f"/repos/{repo}/git/ref/heads/{branch}", token, (200,))).json()
+            if current["object"]["sha"] != head["object"]["sha"]:
+                raise UnsafeRepoWrite(f"branch {branch} already exists with other commits")
+
+        current_file = (await _github(client, "GET", f"/repos/{repo}/contents/{path}", token, (200,),
+                                      params={"ref": branch})).json()
+        await _github(client, "PUT", f"/repos/{repo}/contents/{path}", token, (200, 201), json={
+            "message": commit_message, "branch": branch, "sha": current_file["sha"],
+            "content": base64.b64encode(new_content.encode("utf-8")).decode("ascii"),
+        })
+        request = {"title": title, "head": branch, "base": default_branch, "body": body, "draft": True}
+        pull = await _github(client, "POST", f"/repos/{repo}/pulls", token, (201, 422), json=request)
+        if pull.status_code == 422 and "draft" in pull.text.lower():
+            # Draft PRs need a paid plan on private repos: open a normal one
+            # whose title says it is a proposal — merging stays a human act.
+            request.update(draft=False, title=f"[PROPUESTA — revisar antes de mergear] {title}")
+            pull = await _github(client, "POST", f"/repos/{repo}/pulls", token, (201,), json=request)
+        elif pull.status_code == 422:
+            raise RuntimeError(f"GitHub pull request creation failed (422): {pull.text[:200]}")
+        return pull.json()["html_url"]

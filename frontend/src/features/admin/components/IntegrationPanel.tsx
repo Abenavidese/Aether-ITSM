@@ -188,6 +188,17 @@ export function IntegrationPanel() {
     }
   };
 
+  // Fase 16: opt in to draft fix pull requests for diagnosed incidents.
+  const toggleCodeFix = async (enabled: boolean) => {
+    const res = await fetch(`${config.API_BASE_URL}/tenant/settings`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code_fix_prs_enabled: enabled })
+    });
+    if (res.ok) fetchSettings();
+  };
+
   const handleSavePlatform = async () => {
     setPlatformError(null);
     // Blank = keep the stored secret (fields are never prefilled with it).
@@ -592,6 +603,25 @@ export function IntegrationPanel() {
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="mt-6 bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.code_fix_prs_enabled)}
+                onChange={(e) => toggleCodeFix(e.target.checked)}
+                className="mt-1 accent-cyan-500"
+              />
+              <span>
+                <span className="text-sm font-medium text-slate-200">Propose code fixes as draft pull requests</span>
+                <span className="block text-xs text-slate-400 mt-1">
+                  When the logs point at a failing line, Aether opens a <strong>draft</strong> PR with a small fix on a
+                  new <code>aether/fix-*</code> branch for an engineer to review. It never merges, never touches the
+                  default branch and never deploys. The GitHub token needs Contents and Pull requests write access.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="mt-6">

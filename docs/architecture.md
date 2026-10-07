@@ -148,7 +148,24 @@ Attached images never enter the graph as images: `src/agents/runtime/vision.py` 
 
 There is no `human_interrupt_node` as a separate graph node — the pause is `interrupt_after` on `draft_plan` itself, and no Nemotron-Ultra / deep-log-analysis step exists yet for `escalate`; it's the same "super" model doing what `policy`/`execution` do.
 
-### 4.3 Knowledge base (RAG) — Implemented (Fase 14)
+### 4.3 Employee chat: Concierge with an investigation supervisor — Implemented (Fase 16)
+One chat turn is its own small LangGraph graph (`src/agents/concierge/node.py`):
+
+```
+START -> plan -> investigate -> [replan -> investigate] -> respond -> END
+```
+
+- **plan:** the deterministic floor (regex rules: outage wording, code/folder questions) plus what the supervisor model (`supervisor.py`, the "super" model — the 1B model added nothing in the eval) adds from a closed menu of read-only checks; `plan.py` validates every parameter against the tenant's configuration. Skipped for small talk and for tenants with nothing configured.
+- **investigate:** workers (`workers.py`) run the plan with injected readers (`ConciergeSources`): knowledge base, code search and repo layout concurrently, then the platform diagnosis per service (verdict + stack trace → `file:line`), then the files the findings point at.
+- **replan (once, within budget):** when a failing service left no code location, the supervisor may pick files from candidates built by code (e.g. `POST /api/cart/add 500` → `cartController.js`, `cartService.js`).
+- **respond:** the answer from the evidence, the deterministic rules (verdict line, "🔍 Revisé ..." line, an application failure always becomes a ticket), validated citations.
+
+Evidence lives in an in-process per-turn workspace; the checkpoint keeps only small investigation records. Measured with `python -m evals.run --suite diagnosis` (fixture tenant: the real `core-ecommerce-api` repo and Render-shaped logs over mocked HTTP).
+
+### 4.4 Incident → engineering → fix proposal → notification — Implemented (Fase 16)
+An unresolved turn with a failing service opens a ticket that stores the incident as structured data. The ticket flow routes it to `escalate` deterministically (`nodes/supervisor.py`), the outbox enqueues the GitHub issue, and, for tenants that opted in, the issue job enqueues `propose_code_fix`: one validated edit to the failing line (`src/agents/code_fix/`) committed to a new `aether/fix-*` branch and opened as a draft pull request (`src/integrations/github.py`). Every status change notifies the requester in the portal (`notifications` table, `GET /api/me/notifications`); an engineer closes the ticket after merging (`POST /api/tenant/tickets/{id}/resolve`), which notifies again. Guard rails: `docs/security_guardrails.md` §3.4.
+
+### 4.5 Knowledge base (RAG) — Implemented (Fase 14)
 - **Ingest:** upload → validation (`ingest_guard.py`) → parsing (`parsing.py`: PDF headings by font size, tables as Markdown, scanned pages reported) → a new *version* of the document is registered and an `index_document` job queued in the same transaction. The worker chunks by section, redacts secrets, flags injection-like text, embeds in batches and flips the active version atomically; the previous version answers until then (`documents.py`).
 - **Store:** `knowledge_documents` / `knowledge_chunks` with `tenant_id` as a column, RLS on both, a dimensionless `vector` column with one partial HNSW index per embedding model (vectors of different models are never compared), and a GIN full-text index (`store.py`).
 - **Retrieve:** follow-up rewriting (`query.py`) → dense + BM25 + exact-identifier candidates → Reciprocal Rank Fusion → cross-encoder rerank (optional, `rerank.py`) → relevance gate → small-to-big merge → numbered passages (`retrieval.py`). The Concierge does one search over policies and technical docs; ticket nodes search their own source.

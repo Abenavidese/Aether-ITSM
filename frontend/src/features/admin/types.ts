@@ -14,6 +14,8 @@ export type DashboardTicket = {
   created_at: string | null;
   resolution_path: string | null;
   github_issue_url: string | null;
+  // Fase 16: Aether's proposed fix (draft pull request) for a diagnosed incident.
+  fix_pr_url: string | null;
   // Risk-3 plan awaiting approval; ends with the exact action that will run.
   proposed_plan: string | null;
 };

@@ -11,17 +11,24 @@ Handlers are idempotent because delivery is at-least-once:
 - create_github_issue does nothing if the ticket already has its issue URL.
   Known limit: a crash between GitHub's 201 and saving the URL can create a
   duplicate issue on retry.
+- propose_code_fix (Fase 16) does nothing if the ticket already has its PR;
+  on GitHub, an existing open PR for the ticket's aether/fix-* branch is
+  reused instead of opening another.
 """
 import asyncio
 import logging
 
 from langchain_core.messages import HumanMessage
 
+from src.agents.code_fix import RejectedFix, propose_fix
 from src.agents.runtime.vision import describe_attachment
 from src.agents.ticket_flow.runner import awaiting_approval, ticket_graph, ticket_thread_config, ticket_trace_id
-from src.integrations.github import create_issue
+from src.core.config import get_settings
+from src.integrations.github import create_fix_pull_request, create_issue, get_file_content
+from src.integrations.issue_format import build_fix_pull_request
 from src.jobs.queue import JobKind
 from src.jobs.worker import PermanentJobError, WorkerDeps
+from src.llm.factory import get_llms
 from src.observability.tracing import trace_scope
 from src.services import tickets as service
 from src.services.tickets import TicketRun
@@ -44,6 +51,9 @@ async def _initial_state(run: TicketRun, image_base64: str | None) -> dict:
         "user_context": {"email": run.requester_email, "tenant_id": run.tenant_id},
         "assessed_risk": 4,
         "intent": "unknown",
+        # Fase 16: a failing service the chat diagnosed (set by code when the
+        # ticket was opened) — routed to engineering deterministically.
+        "incident": run.incident,
     }
 
 
@@ -91,9 +101,44 @@ async def create_github_issue(payload: dict, deps: WorkerDeps) -> None:
     await asyncio.to_thread(service.save_issue_url, payload["ticket_id"], url)
 
 
+async def propose_code_fix(payload: dict, deps: WorkerDeps) -> None:
+    """
+    Fase 16: a draft PR with one small fix for the failing line of a
+    diagnosed incident. The model proposes, code validates
+    (agents/code_fix), and github.create_fix_pull_request enforces where it
+    may write. A rejected proposal is a normal outcome, not a retry.
+    """
+    target = await asyncio.to_thread(service.load_fix_target, payload["ticket_id"])
+    if target is None:
+        return
+    located = [(s, loc) for s in target.incident.get("services", []) for loc in s.get("locations", [])]
+    if not located:
+        return
+    svc, loc = located[0]
+    path, line = str(loc["path"]), int(loc["line"])
+    content = await get_file_content(target.repo, target.token, path)
+    _, llm = get_llms()
+    settings = get_settings()
+    try:
+        edit = await propose_fix(llm, path, content, line, list(svc.get("errors", [])),
+                                 settings.code_fix_max_changed_lines)
+    except RejectedFix as e:
+        logger.info("No code fix proposed for ticket %s: %s", target.external_id, e)
+        return
+    title, body = build_fix_pull_request(target.external_id, svc.get("name", ""), path, line,
+                                         list(svc.get("evidence", [])), edit.explanation, target.issue_url)
+    branch = "aether/fix-" + "".join(c if c.isalnum() else "-" for c in target.external_id.lower()).strip("-")[:50]
+    url = await create_fix_pull_request(target.repo, target.token, branch, path, edit.new_content,
+                                        f"fix: {path.rsplit('/', 1)[-1]}:{line} (Aether {target.external_id})",
+                                        title, body)
+    logger.info("Proposed code fix for ticket %s: %s", target.external_id, url)
+    await asyncio.to_thread(service.save_fix_pr_url, target.ticket_id, url)
+
+
 HANDLERS = {
     JobKind.RUN_TICKET.value: run_ticket,
     JobKind.CREATE_GITHUB_ISSUE.value: create_github_issue,
+    JobKind.PROPOSE_CODE_FIX.value: propose_code_fix,
 }
 DEAD_HANDLERS = {JobKind.RUN_TICKET.value: run_ticket_dead}
 

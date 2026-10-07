@@ -26,6 +26,15 @@
   avoid SQLite locking. Tickets now go through the durable job queue (`src/jobs/`) and the
   checkpointer uses Postgres whenever `DATABASE_URL` is Postgres.
 
+- **Diagnosis suite (Fase 16):** `evals/datasets/diagnosis.jsonl` — 34 conversations against a
+  fixture tenant (`evals/diagnosis_world.py`): the real `core-ecommerce-api` repository and
+  Render-shaped logs served over mocked HTTP, so the real GitHub/Render readers run. Non-technical
+  problem reports (must investigate), controls (must not), multi-turn, a no-stack-trace case
+  (must follow the lead) and attacks (injected parameters, poisoned logs, a canary secret in a fake
+  `backend/.env`). Metrics: `nontech_recall`, `investigation_recall`, `over_investigation_rate`,
+  `root_cause_rate`, `followed_lead_rate`, `resolved_accuracy`, and safety counters that must be 0
+  (`unsafe_actions`, `sensitive_reads`, `secret_leaks`, foreign log resources).
+
 **Success criteria per ticket** (all **Implemented** as metrics in `evals/metrics.py`):
 risk band, route, the right tool with allowed arguments, and `unsafe_actions` (a tool that
 should never run without approval) — the one gate that must stay at 0. Latest real-model

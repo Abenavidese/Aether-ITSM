@@ -91,9 +91,13 @@ def build_system_prompt(turn: "TurnContext", tool_catalog: str) -> str:
     or its settings, and no tool can. If asked to, say plainly that you can't
     and that a ticket will go to the engineering team. Never claim you did it.
 
-    When a service diagnosis is present: explain in plain words what is
-    failing, and if code locations are given, read those lines in the file
-    contents and say what in that code causes the error.
+    When a service diagnosis is present: the checks are ALREADY DONE (their
+    results are above) — never say you will check or verify something.
+    Explain in one or two plain sentences, for a person who is not technical,
+    what is failing in the app (in their words, e.g. "adding products to the
+    cart fails on the server") and that it is not their fault. If code
+    locations are given, read those lines in the file contents and add one
+    sentence on what in that code causes the error.
     Available tools:
     {tool_catalog}
 

@@ -1,0 +1,52 @@
+CORE ECOMMERCE — EMPLOYEE / END-USER GUIDE
+============================================
+(Upload this file to Aether's Knowledge Base as source type "Company Policy (General)")
+
+WHAT IS THIS
+------------
+Core Ecommerce is our internal shopping app: log in, browse products, add
+them to a cart, and check out to generate an order. This guide covers the
+normal flow and the most common problems employees run into.
+
+HOW TO LOG IN
+--------------
+1. Go to the app's login page.
+2. Use your email and password. If you don't have an account yet, click
+   "Create an account" and register with any email + a password of at
+   least 6 characters.
+3. Sessions last 4 hours. After that you'll need to log in again — this is
+   expected and is not an account lockout.
+
+HOW TO BUY SOMETHING
+----------------------
+1. On the Shop page, products are grouped by category.
+2. Click "Add to cart" on any in-stock item (out-of-stock items show
+   "Out of stock" and the button is disabled).
+3. Go to the Cart page to review items and the total.
+4. Click "Facturar y comprar" to check out. This generates an order and
+   clears your cart. You can review past orders any time under "Orders".
+
+TROUBLESHOOTING (what to check before opening a ticket)
+-----------------------------------------------------------
+- "Invalid credentials" on login: double-check the email and password. If
+  you don't remember creating an account, use "Create an account" instead
+  of guessing a password.
+- Logged out unexpectedly / "Invalid or expired token": normal after 4
+  hours of inactivity or after switching devices. Just log in again.
+- Can't add a product to the cart: it's out of stock. Ask an admin to check
+  inventory — this is not something a normal account can fix.
+- "Not enough stock" when checking out: someone else may have bought the
+  remaining stock between you adding it to the cart and checking out.
+  Reduce the quantity or try again later.
+- "Cart is empty" when checking out: add at least one product before
+  clicking "Facturar y comprar".
+- Need to see your purchase history: go to "Orders" — it's per-account,
+  admins can additionally see everyone's orders under "Admin".
+
+WHO CAN DO WHAT
+-----------------
+- Customer accounts: browse, buy, and view their own order history.
+- Admin accounts: everything a customer can do, plus editing product stock
+  and viewing every order across all customers, under the "Admin" tab.
+  Regular accounts cannot be upgraded to admin through the app itself —
+  that's a manual, backend-side change.

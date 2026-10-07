@@ -18,6 +18,14 @@ async def supervisor_node(state: AgentState) -> dict:
     """Evaluates the ticket, assigns a risk level, and routes to the next sub-agent."""
     logger.info("Supervisor Agent analyzing Ticket: %s", state.get('ticket_id'))
 
+    if state.get("incident"):
+        # Deterministic (Fase 16): the platform verdict already says the
+        # company's app is failing; no tool can fix code or servers, so the
+        # only correct route is engineering — no model can talk it out of it.
+        logger.info("Ticket %s is a diagnosed application incident — escalating to engineering",
+                    state.get('ticket_id'))
+        return {"intent": "app_incident", "assessed_risk": 4, "next_agent": "escalate", "final_resolution": None}
+
     llm_nano, _ = common.get_llms()
     messages = build_prompt(supervisor_prompt(state.get('ticket_id'), state.get('user_context', {})),
                             state["messages"])

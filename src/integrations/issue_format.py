@@ -49,3 +49,25 @@ def build_escalation_issue(external_id: str | None, title: str, description: str
         f"**Compliance notes:**\n{fenced(compliance_notes)}\n"
     )
     return safe_title(title), body
+
+
+def build_fix_pull_request(external_id: str | None, service: str, path: str, line: int, evidence: list[str],
+                           explanation: str, issue_url: str | None) -> tuple[str, str]:
+    """
+    Fase 16: the draft PR with Aether's proposed fix. Same rules as issues:
+    the model's explanation is fenced; verdict evidence is code-generated;
+    log lines are NEVER included (the repo may be public).
+    """
+    ref = re.sub(r"[^A-Za-z0-9._:-]", "", external_id or "unknown")
+    safe_path = re.sub(r"[^\w./-]", "", path)
+    issue = f"\n**Issue:** {issue_url}\n" if issue_url and issue_url.startswith("https://github.com/") else ""
+    body = (
+        "> ⚠️ **Propuesta automática de Aether — requiere revisión humana.** No se mergeó ni se desplegó nada; "
+        "revisa el diff, pruébalo y decide.\n\n"
+        f"**Ticket:** `{ref}`{issue}\n"
+        f"**Servicio:** `{re.sub(r'[^A-Za-z0-9._ -]', '', service)}`\n"
+        f"**Ubicación del error (stack trace):** `{safe_path}:{int(line)}`\n\n"
+        f"**Diagnóstico (calculado por código):**\n{fenced(chr(10).join(evidence))}\n\n"
+        f"**Explicación del modelo:**\n{fenced(explanation)}\n"
+    )
+    return safe_title(f"Fix {safe_path.rsplit('/', 1)[-1]}:{int(line)} ({ref})"), body

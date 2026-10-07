@@ -2,7 +2,7 @@ import uuid
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import false, func
 
 from .database import Base
 from .types import Embedding
@@ -46,6 +46,10 @@ class Company(Base):
     render_api_key = Column(String, nullable=True)
     # Fernet-encrypted shared secret Vercel signs Log Drain payloads with.
     vercel_drain_secret = Column(String, nullable=True)
+    # Fase 16: let Aether propose code fixes for diagnosed incidents as DRAFT
+    # pull requests (new aether/* branch; never a merge, never the default
+    # branch). Opt-in: the GitHub token then needs contents + pull-requests write.
+    code_fix_prs_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
 
     plan_id = Column(String, ForeignKey("subscription_plans.id"), nullable=True)
 
@@ -105,12 +109,38 @@ class Ticket(Base):
     github_issue_url = Column(String, nullable=True)
     # Risk-3 plan awaiting approval, incl. the exact action (Fase 11.2).
     proposed_plan = Column(String, nullable=True)
+    # Fase 16: the incident the chat diagnosed (JSON: services, verdicts,
+    # code locations, redacted error lines). Written by code only — never
+    # parsed from the description, which contains the user's own text.
+    incident = Column(Text, nullable=True)
+    fix_pr_url = Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     resolved_at = Column(DateTime(timezone=True), nullable=True)
 
     company = relationship("Company")
     user = relationship("User", back_populates="tickets")
+
+
+class Notification(Base):
+    """
+    Fase 16: what the requester is told when their ticket moves (opened,
+    resolved, escalated, fix proposed, ...). In-app, read by the portal.
+    Only ever addressed to one user; tenant-scoped like every other table.
+    """
+    __tablename__ = "notifications"
+    __table_args__ = (Index("ix_notifications_user_created", "user_id", "created_at"),)
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    ticket_id = Column(String, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True)
+    kind = Column(String, nullable=False)       # ticket_opened | resolved | escalated | pending_human | fix_proposed | issue_opened
+    title = Column(String, nullable=False)
+    body = Column(Text, nullable=False)
+    link = Column(String, nullable=True)        # only set for roles allowed to follow it (admins)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class LogAccessAudit(Base):

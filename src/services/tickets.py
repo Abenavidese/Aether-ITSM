@@ -10,6 +10,7 @@ other request shares. Before this, the async routes queried the DB inline.
 Domain errors are exceptions the HTTP layer maps to status codes; nothing in
 here knows about HTTP.
 """
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -20,6 +21,7 @@ from src.integrations.issue_format import build_escalation_issue
 from src.jobs.queue import JobKind, enqueue
 from src.security.api_keys import hash_api_key
 from src.security.encryption import decrypt_token, encrypt_token
+from src.services import notifications
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ AUTONOMOUS_RESOLUTION_COST_SAVED_USD = 12.50
 
 RUN_TICKET_MAX_ATTEMPTS = 3
 GITHUB_ISSUE_MAX_ATTEMPTS = 8
+CODE_FIX_MAX_ATTEMPTS = 3
 
 
 class InvalidApiKey(Exception):
@@ -67,6 +70,7 @@ class TicketRun:
     description: str
     requester_email: str
     status: str
+    incident: dict | None = None
 
 
 def month_start() -> datetime:
@@ -108,16 +112,19 @@ def _monthly_ticket_limit_reached(db, company: Company) -> bool:
 
 
 def _create_and_enqueue(db, company: Company, user: User, external_id: str, title: str, description: str,
-                        image_base64: str | None = None) -> Ticket:
+                        image_base64: str | None = None, incident: dict | None = None) -> Ticket:
     """
     Persists the ticket AND its run_ticket job in one commit (transactional
     outbox) — shared by the webhook and the chat escalation path so both go
-    through the same monthly AI-resolution limit and the same queue.
+    through the same monthly AI-resolution limit and the same queue. The
+    requester's "ticket opened" notification is part of the same commit.
     """
     ticket = Ticket(tenant_id=company.id, user_id=user.id, external_id=external_id,
-                    title=title, description=description, status="open")
+                    title=title, description=description, status="open",
+                    incident=json.dumps(incident, ensure_ascii=False) if incident else None)
     db.add(ticket)
     db.flush()
+    notifications.notify(db, ticket, notifications.TICKET_OPENED)
 
     plan = company.plan
     if plan:
@@ -128,6 +135,7 @@ def _create_and_enqueue(db, company: Company, user: User, external_id: str, titl
             # Logged, but this plan is out of AI resolutions for the period:
             # straight to the human queue, the agent never runs.
             ticket.status = "pending_human"
+            notifications.notify(db, ticket, notifications.ESCALATED)
             db.commit()
             return ticket
 
@@ -169,15 +177,21 @@ def accept_webhook_ticket(api_key: str, external_id: str, title: str, descriptio
         db.close()
 
 
-def open_chat_ticket(user_id: str, external_id: str, title: str, description: str) -> str | None:
-    """Ticket for a chat turn the Concierge couldn't resolve. None = monthly limit reached."""
+def open_chat_ticket(user_id: str, external_id: str, title: str, description: str,
+                     incident: dict | None = None) -> str | None:
+    """
+    Ticket for a chat turn the Concierge couldn't resolve. None = monthly
+    limit reached. `incident` is the structured diagnosis the turn computed
+    (set by code, see concierge.node.incident_of).
+    """
     db = SessionLocal()
     try:
         user = db.get(User, user_id)
         company = db.get(Company, user.company_id) if user else None
         if not company or _monthly_ticket_limit_reached(db, company):
             return None
-        return _create_and_enqueue(db, company, user, external_id, title, description).external_id
+        return _create_and_enqueue(db, company, user, external_id, title, description,
+                                   incident=incident).external_id
     finally:
         db.close()
 
@@ -189,9 +203,18 @@ def load_ticket_run(ticket_id: str) -> TicketRun | None:
         if not ticket:
             return None
         return TicketRun(ticket.id, ticket.tenant_id, ticket.external_id, ticket.title, ticket.description,
-                         ticket.user.email, ticket.status)
+                         ticket.user.email, ticket.status, incident=_load_incident(ticket))
     finally:
         db.close()
+
+
+def _load_incident(ticket: Ticket) -> dict | None:
+    try:
+        incident = json.loads(ticket.incident) if ticket.incident else None
+    except ValueError:
+        logger.warning("Ticket %s has an unreadable incident record — ignored", ticket.id)
+        return None
+    return incident if isinstance(incident, dict) else None
 
 
 def _enqueue_issue(db, ticket: Ticket, reason: str | None, compliance_notes: str | None) -> None:
@@ -212,22 +235,29 @@ def apply_graph_outcome(tenant_id: str, external_id: str, values: dict, awaiting
         ticket = db.query(Ticket).filter(Ticket.tenant_id == tenant_id, Ticket.external_id == external_id).first()
         if not ticket:
             return
+        previous = ticket.status
         if awaiting_approval:
             ticket.status = "pending_human"
             ticket.resolution_path = None
             # What the admin approves must be visible to them (Fase 11.2):
             # the plan text ends with the exact action that will run.
             ticket.proposed_plan = values.get("proposed_plan")
+            kind = notifications.PENDING_HUMAN
         elif is_escalated(values):
             ticket.status = "escalated"
             ticket.resolution_path = None
             _enqueue_issue(db, ticket, values.get("final_resolution"), values.get("compliance_notes"))
+            kind = notifications.ESCALATED
         else:
             ticket.status = "resolved"
             ticket.resolution_path = "human" if values.get("human_approved") is True else "autonomous"
             ticket.resolved_at = datetime.now(timezone.utc)
             ticket.estimated_time_saved_minutes = AUTONOMOUS_RESOLUTION_MINUTES_SAVED
             ticket.cost_saved_usd = AUTONOMOUS_RESOLUTION_COST_SAVED_USD
+            kind = notifications.RESOLVED
+        # Re-syncing an unchanged state (a retried job) must not notify twice.
+        if ticket.status != previous:
+            notifications.notify(db, ticket, kind, detail=values.get("final_resolution") if kind == "resolved" else None)
         db.commit()
     finally:
         db.close()
@@ -243,6 +273,7 @@ def escalate_after_failure(ticket_id: str, error: str) -> None:
         ticket.status = "escalated"
         ticket.resolution_path = None
         _enqueue_issue(db, ticket, "Technical failure in Aether after retries. Manual intervention required.", None)
+        notifications.notify(db, ticket, notifications.ESCALATED)
         db.commit()
     finally:
         db.close()
@@ -282,12 +313,96 @@ def load_issue_target(ticket_id: str, reason: str | None, compliance_notes: str 
         db.close()
 
 
-def save_issue_url(ticket_id: str, url: str) -> None:
+def save_issue_url(ticket_id: str, url: str) -> bool:
+    """
+    Saves the issue link and, for a diagnosed incident whose tenant opted in
+    to fix proposals, enqueues the code-fix job (same commit). Returns
+    whether that job was enqueued.
+    """
     db = SessionLocal()
     try:
         ticket = db.get(Ticket, ticket_id)
-        if ticket:
-            ticket.github_issue_url = url
+        if not ticket:
+            return False
+        ticket.github_issue_url = url
+        if ticket.user and ticket.user.role in notifications.LINK_ROLES:
+            notifications.notify(db, ticket, notifications.ISSUE_OPENED, link=url)
+        enqueued = _wants_code_fix(db, ticket)
+        if enqueued:
+            enqueue(db, JobKind.PROPOSE_CODE_FIX, {"ticket_id": ticket.id}, dedupe_key=f"code_fix:{ticket.id}",
+                    max_attempts=CODE_FIX_MAX_ATTEMPTS)
+        db.commit()
+        return enqueued
+    finally:
+        db.close()
+
+
+def _wants_code_fix(db, ticket: Ticket) -> bool:
+    from src.core.config import get_settings
+    company = db.get(Company, ticket.tenant_id)
+    incident = _load_incident(ticket)
+    located = bool(incident) and any(s.get("locations") for s in incident.get("services", []))
+    return bool(get_settings().code_fix_prs_enabled and company and company.code_fix_prs_enabled
+                and located and not ticket.fix_pr_url)
+
+
+@dataclass(frozen=True)
+class FixTarget:
+    ticket_id: str
+    external_id: str
+    repo: str
+    token: str
+    incident: dict
+    issue_url: str | None
+
+
+def load_fix_target(ticket_id: str) -> FixTarget | None:
+    """None when there is nothing to do (already proposed, opted out, no repo/token, no code location)."""
+    db = SessionLocal()
+    try:
+        ticket = db.get(Ticket, ticket_id)
+        if not ticket or not _wants_code_fix(db, ticket):
+            return None
+        company = db.get(Company, ticket.tenant_id)
+        token = decrypt_token(company.github_token) if company and company.github_token else None
+        incident = _load_incident(ticket)
+        if not token or not company.github_repo or not incident:
+            return None
+        return FixTarget(ticket.id, ticket.external_id, company.github_repo, token, incident,
+                         ticket.github_issue_url)
+    finally:
+        db.close()
+
+
+def save_fix_pr_url(ticket_id: str, url: str) -> None:
+    db = SessionLocal()
+    try:
+        ticket = db.get(Ticket, ticket_id)
+        if ticket and not ticket.fix_pr_url:
+            ticket.fix_pr_url = url
+            notifications.notify(db, ticket, notifications.FIX_PROPOSED, link=url)
             db.commit()
+    finally:
+        db.close()
+
+
+class TicketNotFound(Exception):
+    pass
+
+
+def resolve_by_human(tenant_id: str, external_id: str, note: str | None) -> None:
+    """An engineer closes the ticket (e.g. after merging and deploying the fix); the requester is told."""
+    db = SessionLocal()
+    try:
+        ticket = db.query(Ticket).filter(Ticket.tenant_id == tenant_id, Ticket.external_id == external_id).first()
+        if not ticket:
+            raise TicketNotFound(external_id)
+        if ticket.status == "resolved":
+            return
+        ticket.status = "resolved"
+        ticket.resolution_path = "human"
+        ticket.resolved_at = datetime.now(timezone.utc)
+        notifications.notify(db, ticket, notifications.RESOLVED, detail=note)
+        db.commit()
     finally:
         db.close()

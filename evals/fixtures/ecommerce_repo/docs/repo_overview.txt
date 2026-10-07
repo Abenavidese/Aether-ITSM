@@ -1,0 +1,71 @@
+CORE-ECOMMERCE-API — TECHNICAL OVERVIEW
+========================================
+(Upload this file to Aether's Knowledge Base as source type "Technical Docs (Repo)")
+
+PURPOSE
+-------
+Internal e-commerce service: customer login, product catalog, cart, checkout,
+order history, and an admin inventory panel. Used internally as a reference
+implementation; IT/engineering supports it for employees who build against it.
+
+ARCHITECTURE
+------------
+- backend/  — Node.js + Express, layered: routes -> controllers -> services -> repositories.
+  Storage: SQLite (better-sqlite3), file at backend/data.sqlite.
+  Auth: JWT (Bearer token), 4 hour expiry. Roles: "customer" and "admin".
+- frontend/ — React + Vite SPA (react-router). Talks to the backend via
+  /api during development (Vite dev proxy to http://localhost:4000).
+
+Default ports: backend 4000, frontend 5173 (Vite dev server).
+Seed accounts (created automatically on first backend start):
+  admin@core-ecommerce.test / admin1234  (role: admin)
+  demo@core-ecommerce.test  / demo1234   (role: customer)
+
+API ENDPOINTS
+-------------
+GET  /health                        — liveness check, no auth required.
+POST /api/auth/register             — { email, password } -> { token, user }
+POST /api/auth/login                — { email, password } -> { token, user }
+GET  /api/auth/me                   — current user from the JWT.
+GET  /api/products                  — full catalog with category names.
+GET  /api/products/categories       — category list.
+PATCH /api/products/:id/stock       — admin only. { stock } -> updated product.
+GET  /api/cart                      — current user's cart.
+POST /api/cart/add                  — { product_id, qty } -> updated cart.
+POST /api/cart/clear                — empties the cart.
+POST /api/orders/checkout           — atomic: validates stock, decrements it,
+                                       records the order, clears the cart.
+                                       Fails the whole request if ANY line
+                                       item lacks enough stock.
+GET  /api/orders/mine               — current user's own order history.
+GET  /api/orders/all                — admin only. Every order, every user.
+
+KNOWN ERROR RESPONSES (for triage — these are expected, not bugs)
+-------------------------------------------------------------------
+401 "Missing or invalid Authorization header." — no Bearer token sent.
+401 "Invalid or expired token."   — JWT expired (>4h since login) or malformed;
+                                     the fix is always: log in again.
+403 "Admin role required."        — a customer-role token hit an admin-only
+                                     route (PATCH /products/:id/stock,
+                                     GET /orders/all). This is enforced
+                                     server-side and is correct behavior,
+                                     not a permissions bug to "fix" by
+                                     changing the role check.
+400 "Not enough stock for ..."    — checkout attempted with a cart quantity
+                                     exceeding current stock. Resolution:
+                                     reduce quantity or wait for restock
+                                     (admin can restock via PATCH .../stock).
+400 "Cart is empty."              — checkout called with nothing in the cart.
+400 "Email already registered."   — register called with an existing email;
+                                     the user should log in instead.
+
+OPERATIONAL NOTES
+------------------
+- The backend re-runs its seed script on every startup, but it is idempotent
+  (checks row counts first) — restarting the server never duplicates the
+  seed accounts or products, and never resets stock/orders once real data
+  exists.
+- There is no password reset flow yet — a locked-out user needs an admin to
+  re-provision their account manually (no self-service endpoint exists).
+- CORS is fully open in this environment (test fixture) — do not use this
+  configuration as a reference for a production service.

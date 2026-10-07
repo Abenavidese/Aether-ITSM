@@ -11,7 +11,12 @@ async def escalate_node(state: AgentState) -> dict:
     logger.info("Escalating to Human (Risk 4 or Non-Compliant)")
 
     reason = "high risk or technical error"
-    if state.get("compliance_passed") is False:
+    incident = state.get("incident") or {}
+    failing = [f"{s.get('name')} ({s.get('status')})" for s in incident.get("services", [])]
+    if failing:
+        reason = ("application incident diagnosed from the platform logs: " + ", ".join(failing)
+                  + " — needs a code fix by engineering (the agent cannot change code or servers)")
+    elif state.get("compliance_passed") is False:
         reason = f"Company Policy Violation: {state.get('compliance_notes')}"
     elif state.get("human_approved") is False:
         reason = "the proposed plan was rejected by the human reviewer"

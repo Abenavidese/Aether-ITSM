@@ -1,10 +1,13 @@
 import { Sparkles } from 'lucide-react';
 import { ChatBubble } from '../components/ChatBubble';
 import { ChatInput } from '../components/ChatInput';
+import { NotificationsBell } from '../components/NotificationsBell';
 import { useChat } from '../hooks/useChat';
+import { useNotifications } from '../hooks/useNotifications';
 
 export function EmployeePortalPage() {
-  const { input, setInput, image, setImage, messages, messagesEndRef, handleSubmit } = useChat();
+  const { input, setInput, image, setImage, messages, messagesEndRef, handleSubmit, onNotification } = useChat();
+  const notifications = useNotifications(onNotification);
 
   return (
     <div className="max-w-3xl mx-auto h-[85vh] flex flex-col bg-slate-900 border border-slate-700/50 rounded-2xl shadow-2xl overflow-hidden relative">
@@ -20,6 +23,8 @@ export function EmployeePortalPage() {
           <h1 className="text-xl font-semibold text-slate-100">Aether Concierge</h1>
           <p className="text-sm text-slate-400">AI-Powered IT Support</p>
         </div>
+        <NotificationsBell items={notifications.items} unread={notifications.unread}
+                           onMarkAllRead={notifications.markAllRead} />
       </header>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">

@@ -70,6 +70,11 @@ class AgentState(TypedDict):
     final_resolution: Optional[str]
     technical_error: bool
 
+    # Fase 16: a failing service diagnosed from platform logs by the chat
+    # (structured, set by code). Its fix is code work for engineers: it goes
+    # straight to escalation, the classifier is not asked.
+    incident: Optional[dict]
+
     # Swarm/Hierarchical Routing Fields
     next_agent: Optional[str]
     compliance_passed: Optional[bool]

@@ -33,6 +33,18 @@ export function AdminDashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const resolveTicket = async (externalId: string) => {
+    const note = window.prompt("Mensaje para quien reportó el problema (opcional):", "Ya está corregido.");
+    if (note === null) return;
+    const res = await fetch(`${config.API_BASE_URL}/tenant/tickets/${encodeURIComponent(externalId)}/resolve`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: note.trim() || null }),
+    });
+    if (res.ok) fetchDashboard();
+  };
+
   const approveTicket = async (ticketId: string, approved: boolean, feedback?: string) => {
     if (feedback && !approved) {
       try {
@@ -97,7 +109,7 @@ export function AdminDashboardPage() {
             </div>
           ) : (
             dashboardData?.tickets?.map(t => (
-              <TicketCard key={t.id} ticket={t} isActive={false} />
+              <TicketCard key={t.id} ticket={t} isActive={false} onResolve={resolveTicket} />
             ))
           )}
         </div>
