@@ -10,7 +10,7 @@ import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from src.config import get_settings
+from src.core.config import get_settings
 from src.db.models import AgentSpan
 from src.db.tenant_scope import tenant_session
 

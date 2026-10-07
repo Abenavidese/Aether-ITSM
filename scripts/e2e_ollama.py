@@ -63,7 +63,7 @@ def refuse_remote_database() -> None:
     """Every run registers a new company with users, tickets and documents,
     and nothing deletes them — one run against Supabase left a stray
     "Vertex E2E" tenant in production data. Remote DBs need an explicit opt-in."""
-    from src.config import get_settings
+    from src.core.config import get_settings
     if database_is_local(get_settings().database_url) or os.environ.get("E2E_ALLOW_REMOTE_DB") == "1":
         return
     print("[FAIL] DATABASE_URL apunta a una base remota: este script crea una empresa nueva con usuarios y "
@@ -92,10 +92,10 @@ def _model_is_pulled(requested: str, installed: set) -> bool:
 
 
 def preflight_ollama():
-    # Read the exact same source of truth the app uses (src/config.py) instead
+    # Read the exact same source of truth the app uses (src/core/config.py) instead
     # of guessing env var names here — that duplication is exactly what drifted
     # out of sync the last time the model settings were renamed.
-    from src.config import get_settings
+    from src.core.config import get_settings
     settings = get_settings()
 
     try:

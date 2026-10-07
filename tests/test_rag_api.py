@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 from test_rag_retrieval import MODEL, BowEmbeddings
 
-from src.agent.state import ConciergeResult
+from src.agents.concierge.state import ConciergeResult
 from src.db import models
 from src.db.database import SessionLocal, engine
 from src.jobs.worker import WorkerDeps
@@ -36,7 +36,7 @@ def _schema_and_queue(monkeypatch):
     # Indexing job and API use the bag-of-words fake instead of a real model.
     monkeypatch.setattr("src.rag.embeddings.get_embeddings", lambda: BowEmbeddings())
     monkeypatch.setattr("src.rag.embeddings.embedding_model_id", lambda: MODEL)
-    monkeypatch.setattr("src.rag.router.embedding_model_id", lambda: MODEL)
+    monkeypatch.setattr("src.api.routers.knowledge.embedding_model_id", lambda: MODEL)
 
 
 @pytest.fixture
@@ -67,8 +67,8 @@ def _employee(tenant_id: str) -> TestClient:
 
 
 def _drain_queue():
-    from src.config import get_settings
-    from src.jobs.registry import build_worker
+    from src.core.config import get_settings
+    from src.services.job_registry import build_worker
     worker = build_worker(WorkerDeps(None, None), get_settings())
     while asyncio.run(worker.run_once()):
         pass
@@ -148,8 +148,8 @@ def test_chat_returns_only_the_sources_it_cites(admin, monkeypatch):
     monkeypatch.setattr(service, "_retriever", retriever)
     llm = ScriptedLLM(ConciergeResult(
         response_text="Es el puerto UDP 4500 bloqueado [1]; use el hotspot [3].", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
-    monkeypatch.setattr("src.agent.concierge.node.get_monitored_services", lambda t: [])
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_monitored_services", lambda t: [])
     app.state.checkpointer = MemorySaver()
     app.state.mcp_client = RecordingMCP()
 

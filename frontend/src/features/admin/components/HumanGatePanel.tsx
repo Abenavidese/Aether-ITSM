@@ -9,8 +9,8 @@ interface HumanGatePanelProps {
 
 export function HumanGatePanel({ tickets, onApprove }: HumanGatePanelProps) {
   // Backend status for a Risk-3 ticket paused on draft_plan is "pending_human"
-  // (see src/agent/graph.py interrupt_after=["draft_plan"] and
-  // _sync_ticket_from_snapshot in src/api/routes.py) — this used to filter on
+  // (see src/agents/ticket_flow/runner.py interrupt_after=["draft_plan"] and
+  // src/services/tickets.py) — this used to filter on
   // "paused", a status the real API never sends, so the gate was always empty.
   const pausedTickets = tickets.filter(t => t.status === 'pending_human');
   const [feedback, setFeedback] = useState<Record<string, string>>({});

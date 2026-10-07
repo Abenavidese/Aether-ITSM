@@ -18,8 +18,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.agent.mcp_client import MCPToolClient
-from src.config import get_settings
+from src.core.config import get_settings
+from src.tools.mcp_client import MCPToolClient
 
 from .harness import load_cases, run_chat_case, run_ticket_case
 from .metrics import chat_checks, check_thresholds, route_ok, summarize_chats, summarize_tickets, tool_ok, unsafe_calls

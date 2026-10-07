@@ -17,10 +17,10 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
-from src.agent.concierge import get_concierge_workflow
+from src.agents.concierge import get_concierge_workflow
+from src.agents.ticket_flow.runner import awaiting_approval, ticket_graph
 from src.observability.tracing import trace_scope
-from src.tickets.jobs import awaiting_approval, ticket_graph
-from src.tickets.service import is_escalated
+from src.services.tickets import is_escalated
 
 from .metrics import ChatResult, TicketResult
 

@@ -2,7 +2,7 @@
 
 llm_engine, webhook_url, mcp_server_url and mcp_auth_token were stored and
 shown in Settings but no code ever read them (roadmap 1.2): models are
-platform configuration (src/config.py), the MCP server is a local stdio
+platform configuration (src/core/config.py), the MCP server is a local stdio
 subprocess, and outbound ITSM notifications don't exist yet (roadmap 3.6
 will add them with a signing secret, not a bare URL).
 

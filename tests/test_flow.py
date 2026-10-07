@@ -147,17 +147,17 @@ def _login_as(email: str, password: str = "irrelevant"):
 
 
 def test_chat_resolved_in_one_turn(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
 
     _login_as(load_test_tickets()[0]["user_email"])
     fake_result = ConciergeResult(response_text="Cleared your VPN session.", resolved=True)
     monkeypatch.setattr(
-        "src.agent.concierge.node.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
+        "src.agents.concierge.node.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
     )
     # RAG needs a real Postgres+pgvector store (see docs/architecture.md) —
     # out of scope for this sqlite-backed suite; retrieve_context is
     # exercised for real by scripts/e2e_ollama.py against Supabase.
-    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
+    monkeypatch.setattr("src.agents.concierge.node.retrieve", empty_retrieval)
 
     response = client.post("/api/chat", json={"message": "my vpn is down"})
     assert response.status_code == 200
@@ -165,14 +165,14 @@ def test_chat_resolved_in_one_turn(seeded_company, monkeypatch):
 
 
 def test_chat_escalates_to_ticket(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
 
     _login_as(load_test_tickets()[1]["user_email"])
     fake_result = ConciergeResult(response_text="Opening a ticket for you.", resolved=False)
     monkeypatch.setattr(
-        "src.agent.concierge.node.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
+        "src.agents.concierge.node.get_llms", lambda: (None, _FakeStructuredLLM(fake_result))
     )
-    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
+    monkeypatch.setattr("src.agents.concierge.node.retrieve", empty_retrieval)
 
     response = client.post("/api/chat", json={"message": "I need admin access to prod DB"})
     assert response.status_code == 200
@@ -309,8 +309,8 @@ def _render_transport(requests: list, suspended: bool = False):
 
 
 def _setup_platform_logs(monkeypatch, company_id, result, suspended=False, http_status=500):
-    from src.integrations.logs import service as log_service
-    from src.integrations.logs.render import RenderLogProvider, _cache
+    from src.integrations.platform_logs import service as log_service
+    from src.integrations.platform_logs.render import RenderLogProvider, _cache
 
     _cache.clear()
     db = SessionLocal()
@@ -328,7 +328,7 @@ def _setup_platform_logs(monkeypatch, company_id, result, suspended=False, http_
 
     async def fake_health(url):
         return {"status": "success", "available": http_status < 500, "http_status": http_status}
-    monkeypatch.setattr("src.agent.concierge.node._health_checker", lambda mcp: fake_health)
+    monkeypatch.setattr("src.agents.concierge.node._health_checker", lambda mcp: fake_health)
 
     tree = [{"path": "backend/src/controllers/cartController.js", "type": "file"}]
 
@@ -339,12 +339,12 @@ def _setup_platform_logs(monkeypatch, company_id, result, suspended=False, http_
     async def fake_files(tenant_id, files):
         read_files.extend(files)
         return "\n".join(f"=== {f} (COMPLETE FILE, 1 lines) ===\n  11 | const id = req.user.id;" for f in files)
-    monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", fake_tree)
-    monkeypatch.setattr("src.agent.concierge.node._file_contents_context", fake_files)
-    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
+    monkeypatch.setattr("src.agents.concierge.node._fetch_repo_tree", fake_tree)
+    monkeypatch.setattr("src.agents.concierge.node._file_contents_context", fake_files)
+    monkeypatch.setattr("src.agents.concierge.node.retrieve", empty_retrieval)
 
     llm = _RecordingLLM(result)
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
     return requests, llm, read_files
 
 
@@ -357,7 +357,7 @@ def _audit_rows(company_id):
 
 
 def test_admin_outage_report_reads_logs_and_failing_code(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
     company_id, _ = seeded_company
     _add_user(company_id, "admin@test.co", "admin")
     _login_as("admin@test.co")
@@ -378,7 +378,7 @@ def test_admin_outage_report_reads_logs_and_failing_code(seeded_company, monkeyp
 
 
 def test_employee_gets_verdict_but_never_raw_log_lines(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
     company_id, _ = seeded_company
     _login_as(load_test_tickets()[0]["user_email"])
     _, llm, _ = _setup_platform_logs(
@@ -392,7 +392,7 @@ def test_employee_gets_verdict_but_never_raw_log_lines(seeded_company, monkeypat
 
 
 def test_down_service_always_opens_a_ticket_with_evidence_but_no_log_lines(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
     company_id, _ = seeded_company
     _add_user(company_id, "admin@test.co", "admin")
     _login_as("admin@test.co")
@@ -415,7 +415,7 @@ def test_down_service_always_opens_a_ticket_with_evidence_but_no_log_lines(seede
 
 
 def test_restart_request_is_refused_and_routed_to_humans(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
     company_id, _ = seeded_company
     _add_user(company_id, "admin@test.co", "admin")
     _login_as("admin@test.co")
@@ -431,7 +431,7 @@ def test_restart_request_is_refused_and_routed_to_humans(seeded_company, monkeyp
 
 
 def test_log_audit_is_visible_to_admin_only(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
     company_id, _ = seeded_company
     _add_user(company_id, "admin@test.co", "admin")
     _login_as("admin@test.co")
@@ -448,7 +448,7 @@ def test_log_audit_is_visible_to_admin_only(seeded_company, monkeypatch):
 
 
 def test_connection_test_uses_the_read_only_client(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
     company_id, _ = seeded_company
     _add_user(company_id, "admin@test.co", "admin")
     _login_as("admin@test.co")
@@ -550,7 +550,7 @@ def test_expired_drain_rows_are_purged_on_ingest(seeded_company):
 
 
 def test_chat_diagnoses_a_vercel_service_from_drained_logs(seeded_company, monkeypatch):
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.state import ConciergeResult
     company_id, _ = seeded_company
     _add_user(company_id, "admin@test.co", "admin")
     _login_as("admin@test.co")
@@ -559,13 +559,13 @@ def test_chat_diagnoses_a_vercel_service_from_drained_logs(seeded_company, monke
 
     async def fake_health(url):
         return {"status": "success", "available": True, "http_status": 200}
-    monkeypatch.setattr("src.agent.concierge.node._health_checker", lambda mcp: fake_health)
+    monkeypatch.setattr("src.agents.concierge.node._health_checker", lambda mcp: fake_health)
     async def no_tree(tenant_id):
         return []
-    monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", no_tree)
-    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
+    monkeypatch.setattr("src.agents.concierge.node._fetch_repo_tree", no_tree)
+    monkeypatch.setattr("src.agents.concierge.node.retrieve", empty_retrieval)
     llm = _RecordingLLM(ConciergeResult(response_text="El carrito falla.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
 
     body = client.post("/api/chat", json={"message": "la tienda no carga el carrito"}).json()
     assert "🟠 Estado de Storefront: DEGRADADO" in body["reply"]

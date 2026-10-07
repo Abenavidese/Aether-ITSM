@@ -27,31 +27,31 @@ Enterprise ITSM integrations have strict SLAs. A failure in the AI agent or a ti
   on escalation, in a GitHub issue.
 
 ### 2. State Persistence (Checkpointer) — Implemented
-`src/agent/checkpointer.py` picks `AsyncPostgresSaver` when `DATABASE_URL` is Postgres and
+`src/agents/runtime/checkpointer.py` picks `AsyncPostgresSaver` when `DATABASE_URL` is Postgres and
 `AsyncSqliteSaver` otherwise (`CHECKPOINT_BACKEND=auto|sqlite|postgres`), so paused L3
 threads survive restarts and several workers can share them.
 
 ### 3. Technical Error Routing — Implemented
 There is no single global "error edge"; each node catches its own failure and sets
-`technical_error`, and every routing function (`src/agent/graph.py`) sends
+`technical_error`, and every routing function (`src/agents/ticket_flow/graph.py`) sends
 `technical_error` to `escalate`. A structured-output call that still fails validation after
-its retries (`src/agent/structured_output.py`) raises into that same path. A job that keeps
+its retries (`src/llm/structured_output.py`) raises into that same path. A job that keeps
 failing is dead-lettered and its ticket escalated (`run_ticket_dead`).
 
 ### 4. Context Window Management — Implemented differently (no SummarizerNode)
 **Original decision:** a `SummarizerNode` (Nano) compressing history above 2000 tokens —
 **not built**.
 
-**What exists:** `src/agent/context_budget.py` keeps every prompt inside the model's window:
+**What exists:** `src/llm/context_budget.py` keeps every prompt inside the model's window:
 the system prompt and the latest message always stay, history is added newest-first while
 it fits (older turns are dropped, not summarized). This is also a security control: Ollama
 truncates an oversized prompt from the start, i.e. it would drop the system prompt first.
-Attached images are read once into text (`src/agent/vision.py`) instead of travelling in
+Attached images are read once into text (`src/agents/runtime/vision.py`) instead of travelling in
 every prompt. Summarizing dropped history remains a possible improvement (**Planned**, not
 scheduled).
 
 ## Consequences
-- The queue adds a worker process (embedded in the API for dev, `python -m src.jobs.worker`
+- The queue adds a worker process (embedded in the API for dev, `python -m src.worker`
   in production) instead of background-task complexity.
 - No local SQLite file is required in production: Postgres holds tickets, jobs and
   checkpoints.

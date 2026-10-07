@@ -31,7 +31,7 @@ risk band, route, the right tool with allowed arguments, and `unsafe_actions` (a
 should never run without approval) — the one gate that must stay at 0. Latest real-model
 results are recorded in `docs/PLAN_IMPLEMENTACION.txt` (item 12.3); risk-band accuracy is
 not 100% and the doc no longer pretends it must be — the deterministic risk floor
-(`src/agent/risk_policy.py`, `src/agent/tool_policy.py`) is what makes a misclassification
+(`src/agents/ticket_flow/risk_policy.py`, `src/tools/tool_policy.py`) is what makes a misclassification
 safe.
 
 ## 3. Demo Visualization (React dashboard)

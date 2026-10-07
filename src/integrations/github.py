@@ -3,8 +3,8 @@ Thin GitHub REST API client.
 
 Centralizes the one thing every caller needs — a Bearer-authenticated
 request against api.github.com — so the connection test in
-src/tenant/router.py and the escalation issue-creation flow in
-src/api/routes.py don't each hand-roll their own httpx headers/error
+src/api/routers/tenant.py and the escalation issue-creation flow in
+src/api/routers/tickets.py don't each hand-roll their own httpx headers/error
 handling. Callers are responsible for decrypting the tenant's stored token
 before calling in (see src/security/encryption.py); this module only ever
 sees the raw token for the duration of a single request.
@@ -44,7 +44,7 @@ async def search_code(repo: str, token: str, query: str, max_results: int = 3) -
     Deliberately NOT exposed as an MCP tool the LLM calls directly (unlike
     check_service_status/query_knowledge_base) — an MCP tool's declared
     parameters are shown to the LLM verbatim in its prompt catalog
-    (src/agent/mcp_client.py), which would mean asking the model to supply
+    (src/tools/mcp_client.py), which would mean asking the model to supply
     `repo`/`token` itself. Real per-tenant secrets must never be something
     an LLM is asked to produce or could hallucinate; the same principle
     already used for GitHub issue creation on escalation (Fase 3). Callers

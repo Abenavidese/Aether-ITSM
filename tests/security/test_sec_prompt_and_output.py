@@ -9,14 +9,15 @@ from fakes import ScriptedLLM
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from src.agent.concierge import concierge_node
-from src.agent.context_budget import build_prompt, estimate_tokens
-from src.agent.nodes import policy_agent_node
-from src.agent.state import ConciergeResult, PolicyCheckResult
-from src.api.routes import ChatPayload, TicketPayload
-from src.config import get_settings
+from src.agents.concierge import concierge_node
+from src.agents.concierge.state import ConciergeResult
+from src.agents.ticket_flow.nodes import policy_agent_node
+from src.agents.ticket_flow.state import PolicyCheckResult
+from src.api.schemas.tickets import ChatPayload, TicketPayload
+from src.core.config import get_settings
 from src.integrations import github
 from src.integrations.issue_format import build_escalation_issue
+from src.llm.context_budget import build_prompt, estimate_tokens
 from src.security.limiter import user_or_ip_key
 from src.security.prompt_safety import find_injection_markers, untrusted_block
 from src.security.redaction import redact_code
@@ -48,8 +49,8 @@ def test_injection_heuristics(text, expected):
 
 def test_policy_agent_reads_rag_as_fenced_data(monkeypatch):
     llm = ScriptedLLM(PolicyCheckResult(is_compliant=False, reason="n/a"))
-    monkeypatch.setattr("src.agent.nodes.get_llms", lambda: (None, llm))
-    monkeypatch.setattr("src.agent.nodes.retrieve_context", lambda *a, **kw: INJECTION)
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.retrieve_context", lambda *a, **kw: INJECTION)
     state = {"messages": [HumanMessage(content="instala docker")], "user_context": {"tenant_id": "t1"},
              "assessed_risk": 2, "intent": "software"}
     asyncio.run(policy_agent_node(state))
@@ -71,10 +72,10 @@ def test_concierge_fences_repo_file_contents(monkeypatch, mcp, no_rag, monitored
 
     async def fake_files(tenant_id, files):
         return f"=== backend/src/auth.js (COMPLETE FILE, 1 lines) ===\n   1 | // {INJECTION}"
-    monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", fake_tree)
-    monkeypatch.setattr("src.agent.concierge.node._file_contents_context", fake_files)
+    monkeypatch.setattr("src.agents.concierge.node._fetch_repo_tree", fake_tree)
+    monkeypatch.setattr("src.agents.concierge.node._file_contents_context", fake_files)
     llm = ScriptedLLM(ConciergeResult(response_text="auth.js tiene un comentario sospechoso.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
     asyncio.run(concierge_node(_chat_state("revisa auth.js"), {"configurable": {"mcp_client": mcp}}))
     assert re.search(r'<untrusted_data id="[0-9a-f]{8}" source="repo_files">', llm.prompts[0])
 
@@ -132,7 +133,7 @@ def test_llm_endpoints_are_rate_limited():
     from src.main import app  # noqa: F401 — registers the routes
     from src.security.limiter import limiter
     limited = set(limiter._route_limits)
-    assert {"src.api.routes.chat", "src.rag.router.upload_document", "src.rag.router.submit_ai_feedback"} <= limited
+    assert {"src.api.routers.chat.chat", "src.api.routers.knowledge.upload_document", "src.api.routers.knowledge.submit_ai_feedback"} <= limited
 
 
 # ── 11.8 GitHub issue ─────────────────────────────────────────────────────────
@@ -180,7 +181,7 @@ def test_code_redaction_keeps_code_readable():
 
 def test_concierge_reply_never_shows_a_secret(monkeypatch, mcp, no_rag, monitored):
     llm = ScriptedLLM(ConciergeResult(response_text="La clave es AKIAABCDEFGHIJKLMNOP", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
     out = asyncio.run(concierge_node(_chat_state("cuál es la clave de aws?"), {"configurable": {"mcp_client": mcp}}))
     assert "AKIA" not in out["final_response"]
 

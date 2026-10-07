@@ -23,7 +23,7 @@ through the durable job queue.
 
 - `user_email` must belong to a real Aether user of that tenant (`404` otherwise).
 - `image_base64` is optional: a real png/jpeg/webp as an inline data URI, ≤ 5 MB. It is read
-  by the vision model into text before the agents see the ticket (`src/agent/vision.py`).
+  by the vision model into text before the agents see the ticket (`src/agents/runtime/vision.py`).
 - A re-delivered `ticket_id` is acknowledged and not processed twice.
 - The original draft of this doc specified a Jira-shaped payload at `/api/webhook/jira`;
   that endpoint was never built. An adapter from Jira/ServiceNow payloads to this one is

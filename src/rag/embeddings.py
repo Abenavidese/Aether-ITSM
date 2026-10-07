@@ -1,6 +1,6 @@
 from langchain_core.embeddings import Embeddings
 
-from src.config import get_settings
+from src.core.config import get_settings
 
 # Some embedding models are trained with task prefixes and lose retrieval
 # quality without them — nomic-embed-text expects "search_document: " on
@@ -61,7 +61,7 @@ def embedding_model_id() -> str:
 def get_embeddings() -> Embeddings:
     """
     Returns the configured embeddings model. Model ids live in Settings
-    (src/config.py) exclusively, so switching Ollama -> Nebius/OpenAI is a
+    (src/core/config.py) exclusively, so switching Ollama -> Nebius/OpenAI is a
     .env change, never a code change here.
     """
     settings = get_settings()

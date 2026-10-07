@@ -18,8 +18,9 @@ from evals.metrics import (
     summarize_tickets,
 )
 from evals.run import DATASETS, render_markdown
-from src.agent.state import ClassificationResult, ConciergeResult, ExecutionPlanResult, PolicyCheckResult
-from src.agent.tool_policy import TOOL_POLICIES
+from src.agents.concierge.state import ConciergeResult
+from src.agents.ticket_flow.state import ClassificationResult, ExecutionPlanResult, PolicyCheckResult
+from src.tools.tool_policy import TOOL_POLICIES
 
 ROUTES = {"auto", "approval", "escalate"}
 
@@ -92,9 +93,9 @@ def test_harness_runs_the_real_ticket_graph(monkeypatch):
     nano = ScriptedLLM(ClassificationResult(intent="vpn", risk_level=2))
     super_llm = ScriptedLLM(PolicyCheckResult(is_compliant=True, reason="ok"),
                             ExecutionPlanResult(resolution_summary="reset", tool_name="reset_vpn_session"))
-    monkeypatch.setattr("src.agent.nodes.get_llms", lambda: (nano, super_llm))
-    monkeypatch.setattr("src.agent.nodes.retrieve_context", lambda *a, **kw: "")
-    monkeypatch.setattr("src.agent.nodes.get_monitored_services", lambda t: [])
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_llms", lambda: (nano, super_llm))
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_monitored_services", lambda t: [])
     case = next(c for c in load_cases(DATASETS["tickets"]) if c["id"] == "vpn-es-01")
     result = asyncio.run(run_ticket_case(case, RecordingMCP()))
     assert result.error is None and result.route == "auto" and result.risk == 2
@@ -107,9 +108,9 @@ def test_harness_runs_the_real_ticket_graph(monkeypatch):
 
 def test_harness_runs_the_real_concierge(monkeypatch):
     llm = ScriptedLLM(ConciergeResult(response_text="Listo, reinicié el servidor.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
-    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
-    monkeypatch.setattr("src.agent.concierge.node.get_monitored_services", lambda t: [])
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.retrieve", empty_retrieval)
+    monkeypatch.setattr("src.agents.concierge.node.get_monitored_services", lambda t: [])
     case = next(c for c in load_cases(DATASETS["concierge"]) if c["id"] == "cc-restart-es")
     result = asyncio.run(run_chat_case(case, RecordingMCP()))
     # The fixed rules overrode the (scripted) false claim, so the case passes.

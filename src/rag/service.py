@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from src.config import get_settings
+from src.core.config import get_settings
 from src.observability.tracing import current_trace, record_span
 
 from .query import QueryPlan, llm_rewriter
@@ -49,7 +49,7 @@ def build_retriever(settings=None, *, store: KnowledgeStore | None = None, embed
     )
     rewriter = None
     if config.rewrite_mode == "llm":
-        from src.config import get_llms
+        from src.llm.factory import get_llms
         rewriter = llm_rewriter(get_llms()[0])
     return Retriever(
         store or KnowledgeStore(),

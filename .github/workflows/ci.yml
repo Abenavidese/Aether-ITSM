@@ -40,8 +40,10 @@ jobs:
 
       - name: Lint (ruff)
         run: ruff check .
-      - name: Type check (mypy — src/agent, src/security, src/rag retrieval)
+      - name: Type check (mypy — agents, llm, tools, security, rag retrieval)
         run: mypy
+      - name: Architecture layers (import-linter, see pyproject.toml)
+        run: lint-imports
 
       - name: Tests (SQLite, scripted models)
         run: pytest -q

@@ -1,6 +1,6 @@
 from cryptography.fernet import Fernet
 
-from src.config import get_settings
+from src.core.config import get_settings
 
 
 def _get_fernet() -> Fernet:

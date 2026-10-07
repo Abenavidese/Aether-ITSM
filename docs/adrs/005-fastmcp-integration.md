@@ -4,7 +4,7 @@
 Accepted. Implementation status reviewed against the code on 2026-09-26 (roadmap 1.3):
 - **Implemented:** a real MCP server (`src/tools/mcp_server.py`, `mcp>=2` `MCPServer`, the
   successor of `FastMCP`) over stdio; one long-lived client per app process
-  (`src/agent/mcp_client.py`) that reads the live tool catalog; no mock module.
+  (`src/tools/mcp_client.py`) that reads the live tool catalog; no mock module.
 - **Simulated:** the tool backends. Only `check_service_status` does real work; the VPN, MDM,
   IAM and knowledge-base tools return canned results (`docs/specs/mcp_registry.md`).
 - **Planned:** OpenShell isolation. Today the server is a plain local subprocess on the same
@@ -29,4 +29,4 @@ Initially, the project was planned to use standard Python functions to "mock" th
 ## Consequences
 - **Positive:** The architecture is now 100% compliant with modern decoupled Agent paradigms. It is a much stronger portfolio piece.
 - **Negative:** Increased complexity in the Python code. We must handle async subprocess management and standard IO streaming in LangGraph to communicate with the tool server.
-- **Security:** The LLM logic and the tool execution are separate *processes* (Implemented), but on the same host without a sandbox; physical/network isolation depends on OpenShell (Planned). The guarantees that hold today are in code: `src/agent/tool_policy.py` decides every call.
+- **Security:** The LLM logic and the tool execution are separate *processes* (Implemented), but on the same host without a sandbox; physical/network isolation depends on OpenShell (Planned). The guarantees that hold today are in code: `src/tools/tool_policy.py` decides every call.

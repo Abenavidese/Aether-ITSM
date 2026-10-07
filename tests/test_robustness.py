@@ -14,7 +14,8 @@ import pytest
 from fakes import RecordingMCP, ScriptedLLM, empty_retrieval
 from langgraph.checkpoint.memory import MemorySaver
 
-from src.agent.state import ClassificationResult, ConciergeResult, ExecutionPlanResult, PolicyCheckResult
+from src.agents.concierge.state import ConciergeResult
+from src.agents.ticket_flow.state import ClassificationResult, ExecutionPlanResult, PolicyCheckResult
 from src.db import models
 from src.db.database import SessionLocal, engine
 from src.jobs import queue
@@ -23,8 +24,9 @@ from src.jobs.worker import JobWorker, PermanentJobError, WorkerDeps
 from src.security.api_keys import generate_api_key, hash_api_key
 from src.security.encryption import encrypt_token
 from src.security.hashing import get_password_hash
-from src.tickets import jobs as ticket_jobs
-from src.tickets import service
+from src.services import ticket_runs as ticket_jobs
+from src.services import tickets as service
+from src.services.job_registry import build_worker
 
 EMPLOYEE = "ana.robust@acme.com"
 
@@ -188,8 +190,8 @@ def test_interrupted_agent_run_resumes_from_its_checkpoint(tenant, monkeypatch):
     nano = ScriptedLLM(ClassificationResult(intent="vpn", risk_level=2))
     super_llm = ScriptedLLM(PolicyCheckResult(is_compliant=True, reason="ok"),
                             ExecutionPlanResult(resolution_summary="VPN reset", tool_name="reset_vpn_session"))
-    monkeypatch.setattr("src.agent.nodes.get_llms", lambda: (nano, super_llm))
-    monkeypatch.setattr("src.agent.nodes.get_monitored_services", lambda t: [])
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_llms", lambda: (nano, super_llm))
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_monitored_services", lambda t: [])
     rag_calls = {"n": 0}
 
     def flaky_rag(*a, **kw):
@@ -197,10 +199,10 @@ def test_interrupted_agent_run_resumes_from_its_checkpoint(tenant, monkeypatch):
         if rag_calls["n"] == 1:  # the policy node's first look-up dies mid-run
             raise ConnectionError("pgvector unreachable")
         return ""
-    monkeypatch.setattr("src.agent.nodes.retrieve_context", flaky_rag)
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.retrieve_context", flaky_rag)
 
     mcp = RecordingMCP()
-    worker = ticket_jobs.build_worker(WorkerDeps(MemorySaver(), mcp), _settings())
+    worker = build_worker(WorkerDeps(MemorySaver(), mcp), _settings())
     asyncio.run(worker.run_once())
     assert _jobs(JobKind.RUN_TICKET)[0].status == JobStatus.QUEUED.value  # will retry
 
@@ -214,7 +216,7 @@ def test_interrupted_agent_run_resumes_from_its_checkpoint(tenant, monkeypatch):
 
 
 def _settings():
-    from src.config import get_settings
+    from src.core.config import get_settings
     return get_settings()
 
 
@@ -232,9 +234,9 @@ def test_run_ticket_job_is_idempotent_once_finished(tenant, monkeypatch):
     service.accept_webhook_ticket(api_key, "RB-3", "Docs", "¿dónde está la guía?", email)
     nano = ScriptedLLM(ClassificationResult(intent="faq", risk_level=0))
     super_llm = ScriptedLLM(ExecutionPlanResult(resolution_summary="Está en la wiki"))
-    monkeypatch.setattr("src.agent.nodes.get_llms", lambda: (nano, super_llm))
-    monkeypatch.setattr("src.agent.nodes.get_monitored_services", lambda t: [])
-    monkeypatch.setattr("src.agent.nodes.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_llms", lambda: (nano, super_llm))
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_monitored_services", lambda t: [])
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.retrieve_context", lambda *a, **kw: "")
     deps = WorkerDeps(MemorySaver(), RecordingMCP())
     payload = json.loads(_jobs(JobKind.RUN_TICKET)[0].payload)
     asyncio.run(ticket_jobs.run_ticket(payload, deps))
@@ -267,7 +269,7 @@ def test_escalation_issue_survives_a_github_outage(tenant, monkeypatch):
         return "https://github.com/acme/repo/issues/7"
     monkeypatch.setattr(ticket_jobs, "create_issue", flaky_create_issue)
 
-    worker = ticket_jobs.build_worker(WorkerDeps(None, None), _settings())
+    worker = build_worker(WorkerDeps(None, None), _settings())
     db = SessionLocal()
     try:  # the run_ticket job isn't under test here
         db.query(models.Job).filter(models.Job.kind == JobKind.RUN_TICKET.value).delete()
@@ -287,14 +289,14 @@ def test_escalation_issue_survives_a_github_outage(tenant, monkeypatch):
 def test_health_stays_fast_while_a_chat_waits_on_blocking_io(tenant, monkeypatch):
     from src.main import app
     _, _, email = tenant
-    monkeypatch.setattr("src.agent.concierge.node.get_llms",
+    monkeypatch.setattr("src.agents.concierge.node.get_llms",
                         lambda: (None, ScriptedLLM(ConciergeResult(response_text="ok", resolved=True))))
-    monkeypatch.setattr("src.agent.concierge.node.get_monitored_services", lambda t: [])
+    monkeypatch.setattr("src.agents.concierge.node.get_monitored_services", lambda t: [])
 
     def slow_rag(*a, **kw):
         time.sleep(1.5)  # blocking, like an embedding call + pgvector round-trip
         return empty_retrieval()
-    monkeypatch.setattr("src.agent.concierge.node.retrieve", slow_rag)
+    monkeypatch.setattr("src.agents.concierge.node.retrieve", slow_rag)
     app.state.checkpointer = MemorySaver()
     app.state.mcp_client = RecordingMCP()
 

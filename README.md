@@ -41,16 +41,16 @@ flowchart LR
 
 Key design choices:
 
-- **Deterministic guardrails.** Risk floors (`src/agent/risk_policy.py`) and a default-deny
-  per-tool policy (`src/agent/tool_policy.py`) can only raise risk, bind identity arguments
+- **Deterministic guardrails.** Risk floors (`src/agents/ticket_flow/risk_policy.py`) and a default-deny
+  per-tool policy (`src/tools/tool_policy.py`) can only raise risk, bind identity arguments
   to the requester, validate arguments and block SSRF. A risk-3 action is frozen at plan
   time and runs exactly as approved, with no LLM in between.
 - **Untrusted input stays data.** RAG chunks, repo files, logs, tool output and screenshot
   text are redacted and fenced (`src/security/prompt_safety.py`); the prompt budget keeps the
-  system prompt from being truncated away (`src/agent/context_budget.py`).
+  system prompt from being truncated away (`src/llm/context_budget.py`).
 - **Screenshots → text.** A vision model reads an attached image once (visible error text
   verbatim + a short description); the text-only agents get that text, so risk floors, RAG
-  and "read the file from the stack trace" all keep working (`src/agent/vision.py`).
+  and "read the file from the stack trace" all keep working (`src/agents/runtime/vision.py`).
 - **Durable work.** A job queue in the same database (transactional outbox, retries,
   heartbeat, dead-letter, crash-resume from the last LangGraph checkpoint), no Redis.
 - **Measured.** An eval harness on the real graph (`evals/`), per-node/per-call tracing with
@@ -93,7 +93,8 @@ cd frontend && npm install && npm run dev            # http://localhost:5173
 | Command | What it checks |
 | :-- | :-- |
 | `pytest -q` | ~250 tests: graph, queue, security findings, tool policy, migrations, vision — scripted models, no network |
-| `ruff check .` · `mypy` | lint; types for `src/agent`, `src/security` and the retrieval modules of `src/rag` |
+| `ruff check .` · `mypy` | lint; types for `src/agents`, `src/llm`, `src/prompts`, `src/tools`, `src/core`, `src/security` and the retrieval modules of `src/rag` |
+| `lint-imports` | the layer contract below: no module imports a layer above its own |
 | `RLS_TEST_DATABASE_URL=… pytest tests/test_rls_postgres.py` | Row-Level Security on a real Postgres |
 | `python -m evals.run --suite all --fail-under unsafe_actions_max=0` | 42 tickets + 10 chat turns on the real models; unsafe actions must be 0 |
 | `python -m evals.rag.run --database-url <disposable pg>` | RAG retrieval eval: 74 queries over a 16-document, 2-tenant corpus (hit@k, MRR, nDCG, "no answer", tenant leaks) |
@@ -118,19 +119,27 @@ RLS suite on Postgres, the frontend lint/type-check/build, and both Docker build
 
 ## Repository map
 
+The backend is layered; each package may import only from its own layer or the ones below it
+(enforced by `lint-imports`, see `[tool.importlinter]` in `pyproject.toml`):
+
 ```
-src/agent/          graph, nodes, risk + tool policy, vision, Concierge chat agent
-src/api/            webhook, approval and chat endpoints
-src/jobs/ src/tickets/   durable queue and ticket lifecycle
-src/security/       redaction, prompt fences, URL guard, image validation, auth deps
-src/rag/            parsing, chunking, versioned indexing (queue), hybrid retrieval, reranking, citations
-src/integrations/   GitHub, read-only Render/Vercel logs
-src/observability/  spans, usage, request/trace ids
-src/db/             models, migrations runner, Row-Level Security
-migrations/         Alembic revisions
-evals/ scripts/     evaluation harness, E2E and red-team scripts
-frontend/           React + Vite + Tailwind
-docs/               architecture, security guardrails, ADRs, specs, roadmap
+src/main.py src/worker.py   entrypoints: create_app() for uvicorn, standalone job worker (python -m src.worker)
+src/api/                    deps (DI), routers/ per resource, schemas/ (request/response models), errors
+src/services/               use cases: tickets, ticket runs, chat, auth, users, tenant, job registry
+src/agents/
+  ticket_flow/              LangGraph graph, state, risk policy, nodes/ (supervisor, policy, execution, draft_plan, escalate)
+  concierge/                employee chat agent: turn, repo access, platform logs, reply
+  runtime/                  checkpointer, message helpers, vision (screenshots -> text)
+src/tools/ src/prompts/     MCP server + client and tool policy; prompt templates
+src/rag/ src/integrations/  retrieval pipeline; GitHub, read-only Render/Vercel logs (platform_logs/)
+src/llm/                    model factory, structured output, context budget
+src/jobs/ src/observability/  durable DB queue; spans, usage, request/trace ids
+src/db/ src/security/       models, migrations runner, Row-Level Security; redaction, fences, URL guard
+src/core/ src/utils/        settings; small shared helpers
+migrations/                 Alembic revisions
+evals/ scripts/             evaluation harness, E2E and red-team scripts
+frontend/                   React + Vite + Tailwind
+docs/                       architecture, security guardrails, ADRs, specs, roadmap
 ```
 
 ## Documentation

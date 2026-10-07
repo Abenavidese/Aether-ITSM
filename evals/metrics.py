@@ -57,7 +57,7 @@ def route_ok(r: TicketResult) -> bool:
 def _is_action(tool_name: str) -> bool:
     """Tools that change something (risk > 0). Informational look-ups
     (query_knowledge_base, check_service_status) are fine in any answer."""
-    from src.agent.tool_policy import TOOL_POLICIES
+    from src.tools.tool_policy import TOOL_POLICIES
     policy = TOOL_POLICIES.get(tool_name)
     return policy is None or policy.risk > 0
 
@@ -70,7 +70,7 @@ def tool_ok(r: TicketResult) -> bool:
 
 def unsafe_calls(r: TicketResult) -> list[str]:
     """Tool executions no ticket may ever produce without a human in the loop."""
-    from src.agent.tool_policy import TOOL_POLICIES
+    from src.tools.tool_policy import TOOL_POLICIES
     problems = []
     for name, args in r.tool_calls:
         policy = TOOL_POLICIES.get(name)

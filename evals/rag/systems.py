@@ -146,7 +146,7 @@ class CurrentSystem:
             elif key in _INT_OPTIONS:
                 setattr(config, key, int(value))
         if config.rewrite_mode == "llm" and retriever.rewriter is None:
-            from src.config import get_llms
+            from src.llm.factory import get_llms
             from src.rag.query import llm_rewriter
             retriever.rewriter = llm_rewriter(get_llms()[0])
         self.retriever = retriever

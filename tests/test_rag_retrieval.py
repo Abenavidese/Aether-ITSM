@@ -418,6 +418,6 @@ def test_retrieval_failure_degrades_to_empty_context(kb):
 
 
 def test_every_job_kind_has_a_handler():
-    from src.jobs.registry import handlers
+    from src.services.job_registry import handlers
     all_handlers, dead = handlers()
     assert "index_document" in all_handlers and "index_document" in dead

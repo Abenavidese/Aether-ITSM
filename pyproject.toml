@@ -30,12 +30,37 @@ check_untyped_defs = true
 warn_unused_ignores = true
 # Report errors only in the files below; imported modules are analysed but not (yet) held to it.
 follow_imports = "silent"
-# Typed core first (roadmap 1.4): the agent's decision code, the security layer
+# Typed core first (roadmap 1.4): the agents, their LLM/prompt/tool layers, the security layer
 # and the retrieval pipeline (Fase 14). The RAG modules that work on ORM rows
 # (documents, router, insights, admin) join once the models move to Mapped[] types.
 files = [
-    "src/agent", "src/security",
+    "src/agents", "src/llm", "src/prompts", "src/tools", "src/core", "src/utils", "src/security",
     "src/rag/text.py", "src/rag/query.py", "src/rag/retrieval.py", "src/rag/rerank.py",
     "src/rag/citations.py", "src/rag/parsing.py", "src/rag/store.py", "src/rag/service.py",
     "src/rag/embeddings.py", "src/rag/chunking.py",
 ]
+
+[tool.importlinter]
+root_package = "src"
+# Type-only imports (under TYPE_CHECKING) don't create runtime coupling.
+exclude_type_checking_imports = true
+
+# The backend's architecture, enforced in CI (`lint-imports`): a module may
+# import from its own layer's package or any layer BELOW it, never above.
+# Packages on one line separated by "|" are siblings that must not import
+# each other either.
+[[tool.importlinter.contracts]]
+name = "Layered backend architecture"
+type = "layers"
+layers = [
+    "src.main | src.worker",
+    "src.api",
+    "src.services",
+    "src.agents",
+    "src.tools | src.prompts | src.rag | src.integrations",
+    "src.llm",
+    "src.jobs | src.observability",
+    "src.db | src.security",
+    "src.core | src.utils",
+]
+

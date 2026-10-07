@@ -5,7 +5,7 @@ Two ways to run it, same code:
 - embedded in the API process (JOBS_EMBEDDED_WORKER=true, the dev default;
   started from the FastAPI lifespan), or
 - standalone, so API and agent runs scale and restart independently:
-      python -m src.jobs.worker
+      python -m src.worker
 
 Concurrency is bounded (JOBS_CONCURRENCY): a burst of webhooks queues up
 instead of launching dozens of simultaneous 8B-model runs. All DB work goes
@@ -15,7 +15,6 @@ import asyncio
 import logging
 import os
 import socket
-import sys
 import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -146,32 +145,3 @@ def _mark_dead(db, job_id: str, error: str) -> None:
         job.attempts = job.max_attempts
     db.commit()
     queue.fail(db, job_id, error)
-
-
-async def _main() -> None:
-    from src.agent.checkpointer import open_checkpointer
-    from src.agent.mcp_client import MCPToolClient
-    from src.config import get_settings
-    from src.jobs.registry import build_worker
-
-    settings = get_settings()
-    stop = asyncio.Event()
-    async with open_checkpointer(settings) as checkpointer:
-        mcp_client = MCPToolClient()
-        await mcp_client.connect()
-        try:
-            worker = build_worker(WorkerDeps(checkpointer, mcp_client), settings)
-            await worker.run_forever(stop)
-        finally:
-            await mcp_client.close()
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    # psycopg's async driver (Postgres checkpointer) can't run on Windows'
-    # default Proactor loop; MCP's stdio client works on either.
-    loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
-    try:
-        asyncio.run(_main(), loop_factory=loop_factory)
-    except KeyboardInterrupt:
-        pass

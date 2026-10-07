@@ -10,15 +10,15 @@ def mcp():
 
 @pytest.fixture
 def no_rag(monkeypatch):
-    monkeypatch.setattr("src.agent.nodes.retrieve_context", lambda *a, **kw: "")
-    monkeypatch.setattr("src.agent.concierge.node.retrieve", empty_retrieval)
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agents.concierge.node.retrieve", empty_retrieval)
 
 
 @pytest.fixture
 def monitored(monkeypatch):
     """One configured healthcheck target for every tenant."""
     services = [{"name": "Tienda", "url": "https://shop.example.com/health"}]
-    for target in ("src.agent.nodes.get_monitored_services", "src.agent.concierge.node.get_monitored_services"):
+    for target in ("src.agents.ticket_flow.nodes.common.get_monitored_services", "src.agents.concierge.node.get_monitored_services"):
         monkeypatch.setattr(target, lambda tenant_id: services)
     return services
 

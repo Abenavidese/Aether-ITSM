@@ -5,8 +5,8 @@ Pure function over a fake GitHub tree shaped like the real test repo
 (Abenavidese/core-ecommerce-api) — no network, no LLM. Each case is a real
 message that previously produced a wrong or empty answer in the chat.
 """
-from src.agent.concierge.repo_access import _format_file
-from src.agent.concierge.repo_view import (
+from src.agents.concierge.repo_access import _format_file
+from src.agents.concierge.repo_view import (
     _describe_directory,
     _extract_paths,
     _ungrounded_repo_names,
@@ -122,8 +122,8 @@ def test_missing_path_view_is_marked_as_fallback():
 
 
 def test_list_items_from_details_are_rendered_in_the_reply():
-    from src.agent.concierge.reply import _compose_reply
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.reply import _compose_reply
+    from src.agents.concierge.state import ConciergeResult
     result = ConciergeResult(response_text="Esto hace cada archivo:", resolved=True,
                              details=["auth.js: valida el JWT", "- wrap.js: captura errores async"])
     assert _compose_reply(result) == (
@@ -132,8 +132,8 @@ def test_list_items_from_details_are_rendered_in_the_reply():
 
 
 def test_schema_junk_items_are_dropped_from_the_reply():
-    from src.agent.concierge.reply import _compose_reply
-    from src.agent.state import ConciergeResult
+    from src.agents.concierge.reply import _compose_reply
+    from src.agents.concierge.state import ConciergeResult
     result = ConciergeResult(response_text="Intro", resolved=True,
                              details=["real finding: cartController.js:5", "tool_used_check_service_status:false,"])
     assert _compose_reply(result) == "Intro\n\n- real finding: cartController.js:5"

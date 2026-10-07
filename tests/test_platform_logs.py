@@ -9,9 +9,9 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from src.integrations.logs.base import ServiceRef
-from src.integrations.logs.readonly_http import PlatformAPIError, ReadOnlyHttpClient, ReadOnlyViolation
-from src.integrations.logs.render import RENDER_ALLOWED_PATHS, RenderLogProvider, _cache
+from src.integrations.platform_logs.base import ServiceRef
+from src.integrations.platform_logs.readonly_http import PlatformAPIError, ReadOnlyHttpClient, ReadOnlyViolation
+from src.integrations.platform_logs.render import RENDER_ALLOWED_PATHS, RenderLogProvider, _cache
 
 SERVICE = ServiceRef(name="Backend", url="https://backend.example.com/health", provider="render",
                      service_id="srv-abc123def456", owner_id="tea-xyz789uvw012")
@@ -130,7 +130,7 @@ def _real_trace(instance="srv-abc123def456-znw5j", start="2026-09-23T11:55:00.87
 
 
 def test_multiline_stack_trace_is_one_error_entry_with_its_frames():
-    from src.integrations.logs.diagnosis import locations_from_logs
+    from src.integrations.platform_logs.diagnosis import locations_from_logs
     rec = Recorder({"/v1/logs": {"hasMore": False, "logs": [
         _render_log("listening on 10000", level="info", ts="2026-09-23T11:50:00Z", instance="srv-abc123def456-znw5j"),
         *_real_trace()]}})
@@ -206,8 +206,8 @@ def test_same_credential_hits_the_cache():
 
 # ── 10.4: sanitization ───────────────────────────────────────────────────────
 
-from src.integrations.logs.base import LogEntry  # noqa: E402
-from src.integrations.logs.sanitize import compact, redact, render_block  # noqa: E402
+from src.integrations.platform_logs.base import LogEntry  # noqa: E402
+from src.integrations.platform_logs.sanitize import compact, redact, render_block  # noqa: E402
 
 
 @pytest.mark.parametrize("raw, leaked", [
@@ -256,8 +256,8 @@ def test_logs_are_fenced_as_data():
 
 # ── 10.5: deterministic diagnosis ────────────────────────────────────────────
 
-from src.integrations.logs.base import ServiceState  # noqa: E402
-from src.integrations.logs.diagnosis import (  # noqa: E402
+from src.integrations.platform_logs.base import ServiceState  # noqa: E402
+from src.integrations.platform_logs.diagnosis import (  # noqa: E402
     DEGRADED,
     DOWN,
     UNKNOWN,
@@ -322,7 +322,7 @@ def test_only_error_entries_are_mined_for_locations():
     assert locations_from_logs([info], _TREE) == []
 
 
-from src.integrations.logs.base import infer_level  # noqa: E402
+from src.integrations.platform_logs.base import infer_level  # noqa: E402
 
 
 @pytest.mark.parametrize("label, message, status, expected", [

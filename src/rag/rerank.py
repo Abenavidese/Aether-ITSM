@@ -140,7 +140,7 @@ _rerankers_lock = threading.Lock()
 
 
 def get_reranker(name: str | None = None) -> Reranker:
-    from src.config import get_settings
+    from src.core.config import get_settings
     settings = get_settings()
     name = (name if name is not None else settings.rag_reranker).strip()
     if not name or name.lower() == "none":

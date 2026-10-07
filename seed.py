@@ -4,21 +4,20 @@ import sys
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.auth.schemas import UserCreate
-from src.auth.service import create_tenant_and_user
 from src.db import models
 from src.db.database import SessionLocal, engine
+from src.services.auth import TenantSignup, create_tenant_and_user
 
 # Create tables
 models.Base.metadata.create_all(bind=engine)
 db = SessionLocal()
 
 try:
-    user = UserCreate(
+    user = TenantSignup(
         email="admin@manitas.com",
         password="Admin123!",
+        full_name="Manitas Admin",
         company_name="Manitas",
-        role="superadmin"
     )
     created_user = create_tenant_and_user(db, user)
     print("Seed successful!")

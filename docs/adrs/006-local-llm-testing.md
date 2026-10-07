@@ -11,8 +11,8 @@ During the hackathon and normal development cycles, iterating on LangGraph agent
 
 ## Decisions
 
-### 1. Abstracting LLM Initialization (`src/config.py`)
-**Decision:** We will abstract the instantiation of LLMs into a Factory function in `src/config.py`. The system will read a `USE_OLLAMA` environment variable.
+### 1. Abstracting LLM Initialization (`src/core/config.py`)
+**Decision:** We will abstract the instantiation of LLMs into a Factory function in `src/core/config.py`. The system will read a `USE_OLLAMA` environment variable.
 *   If `USE_OLLAMA=True`: The system initializes `ChatOllama` using local models running on the developer's machine.
 *   If `USE_OLLAMA=False`: The system initializes `ChatOpenAI` pointing to the Nebius Token Factory `base_url`.
 

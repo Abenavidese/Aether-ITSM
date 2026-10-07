@@ -13,10 +13,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import ValidationError
 
 from scripts.e2e_ollama import database_is_local
-from src.agent.concierge import concierge_node
-from src.agent.state import ConciergeResult
-from src.config import Settings
-from src.integrations.logs.diagnosis import UP, compute_verdict
+from src.agents.concierge import concierge_node
+from src.agents.concierge.state import ConciergeResult
+from src.core.config import Settings
+from src.integrations.platform_logs.diagnosis import UP, compute_verdict
 from src.security import url_guard
 from src.tools import mcp_server
 
@@ -78,9 +78,9 @@ def test_listing_footer_in_history_does_not_retrigger_a_listing(monkeypatch, mcp
     async def fake_tree(tenant_id):
         fetched.append(tenant_id)
         return [{"path": "frontend/src/api", "type": "dir"}, {"path": "frontend/src/api/client.js", "type": "file"}]
-    monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", fake_tree)
+    monkeypatch.setattr("src.agents.concierge.node._fetch_repo_tree", fake_tree)
     llm = ScriptedLLM(ConciergeResult(response_text="Entendido.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
     history = [HumanMessage(content="hola"),
                AIMessage(content="Hola.\n\n📂 Contenido real (GitHub) de `frontend/src/api/`:\n- client.js")]
     out = asyncio.run(concierge_node(_chat_state("gracias por la ayuda con la api", history),
@@ -96,9 +96,9 @@ def test_user_follow_up_still_triggers_a_listing(monkeypatch, mcp, no_rag, monit
         fetched.append(tenant_id)
         return [{"path": "backend/src/middleware", "type": "dir"},
                 {"path": "backend/src/middleware/auth.js", "type": "file"}]
-    monkeypatch.setattr("src.agent.concierge.node._fetch_repo_tree", fake_tree)
+    monkeypatch.setattr("src.agents.concierge.node._fetch_repo_tree", fake_tree)
     llm = ScriptedLLM(ConciergeResult(response_text="Ahí está.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
     history = [HumanMessage(content="lista los archivos de controllers"), AIMessage(content="...")]
     asyncio.run(concierge_node(_chat_state("y en middleware?", history), {"configurable": {"mcp_client": mcp}}))
     assert fetched == ["t1"]
@@ -106,7 +106,7 @@ def test_user_follow_up_still_triggers_a_listing(monkeypatch, mcp, no_rag, monit
 
 def test_outage_with_no_log_service_says_so(monkeypatch, mcp, no_rag, monitored):
     llm = ScriptedLLM(ConciergeResult(response_text="Lo reviso.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
     out = asyncio.run(concierge_node(_chat_state("la tienda no carga"), {"configurable": {"mcp_client": mcp}}))
     assert "No hay servicios monitoreados con acceso a logs" in out["final_response"]
     assert "Service diagnosis: NOT AVAILABLE" in llm.prompts[0]
@@ -114,7 +114,7 @@ def test_outage_with_no_log_service_says_so(monkeypatch, mcp, no_rag, monitored)
 
 def test_ordinary_message_gets_no_services_note(monkeypatch, mcp, no_rag, monitored):
     llm = ScriptedLLM(ConciergeResult(response_text="Claro.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
     out = asyncio.run(concierge_node(_chat_state("cómo cambio mi contraseña"), {"configurable": {"mcp_client": mcp}}))
     assert "No hay servicios monitoreados" not in out["final_response"]
 
@@ -122,7 +122,7 @@ def test_ordinary_message_gets_no_services_note(monkeypatch, mcp, no_rag, monito
 def test_employee_is_not_shown_the_configuration_note(monkeypatch, mcp, no_rag, monitored):
     # "my vpn is down" matches the outage pattern but isn't a server problem.
     llm = ScriptedLLM(ConciergeResult(response_text="Reinicia la VPN.", resolved=True))
-    monkeypatch.setattr("src.agent.concierge.node.get_llms", lambda: (None, llm))
+    monkeypatch.setattr("src.agents.concierge.node.get_llms", lambda: (None, llm))
     state = _chat_state("my vpn is down")
     state["user_context"]["role"] = "employee"
     out = asyncio.run(concierge_node(state, {"configurable": {"mcp_client": mcp}}))

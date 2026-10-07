@@ -51,7 +51,7 @@ def main() -> None:
     args = parser.parse_args()
     url = args.database_url
     if not url:
-        from src.config import get_settings
+        from src.core.config import get_settings
         url = os.environ.get("DATABASE_URL") or get_settings().database_url
     apply(url, rollback=args.rollback)
     print("RLS rolled back." if args.rollback else "RLS enabled. Now set DB_RLS_ENABLED=true.")

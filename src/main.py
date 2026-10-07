@@ -1,3 +1,8 @@
+"""
+API composition root: settings, middleware, routers and the shared resources
+(LangGraph checkpointer, MCP tool server, embedded job worker) opened once per
+process in the lifespan. `uvicorn src.main:app`.
+"""
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -7,26 +12,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from src.agent.checkpointer import open_checkpointer
-from src.agent.mcp_client import MCPToolClient
-from src.api.routes import router as webhook_router
-from src.auth.router import router as auth_router
-from src.config import get_settings
-from src.db import (
-    models,
-    tenant_scope,  # noqa: F401 — registers the RLS session listener (roadmap 2.5)
-)
+from src.agents.runtime.checkpointer import open_checkpointer
+from src.api.routers import auth, chat, integrations, knowledge, observability, tenant, tickets, users
+from src.core.config import get_settings
+from src.db import tenant_scope  # noqa: F401 — registers the RLS session listener (roadmap 2.5)
 from src.db.database import engine
 from src.db.migrate import upgrade_to_head
-from src.integrations.logs.router import router as log_drain_router
-from src.jobs.registry import build_worker
 from src.jobs.worker import WorkerDeps
 from src.observability.logging import RequestIdMiddleware, configure_logging
-from src.observability.router import router as observability_router
-from src.rag.router import router as rag_router
 from src.security.limiter import limiter
-from src.tenant.router import router as tenant_router
-from src.tenant.user_router import router as user_router
+from src.services.bootstrap import seed_database
+from src.services.job_registry import build_worker
+from src.tools.mcp_client import MCPToolClient
 
 settings = get_settings()
 
@@ -34,67 +31,16 @@ settings = get_settings()
 configure_logging(settings.log_format)
 logger = logging.getLogger(__name__)
 
-# Schema changes are Alembic migrations (migrations/, roadmap 1.4), applied by
-# `alembic upgrade head` / `python -m src.db.migrate` as a deploy step. Only
-# with DB_AUTO_MIGRATE=true (dev, tests) does startup apply them itself — a
-# shared database is never altered just because an API process started.
-if settings.db_auto_migrate:
-    upgrade_to_head(engine)
+ROUTERS = (tickets, chat, auth, tenant, users, knowledge, integrations, observability)
 
-def seed_database():
-    from src.auth.service import get_password_hash
-    from src.db.database import SessionLocal
-    db = SessionLocal()
-
-    try:
-        # Seed Plans
-        plans = [
-            models.SubscriptionPlan(id="plan_free", name="Free", price_usd=0.0, max_users=2, max_tickets_per_month=100, max_ai_resolutions_per_month=50),
-            models.SubscriptionPlan(id="plan_pro", name="Pro", price_usd=49.0, max_users=10, max_tickets_per_month=500, max_ai_resolutions_per_month=250),
-            models.SubscriptionPlan(id="plan_enterprise", name="Enterprise", price_usd=199.0, max_users=999, max_tickets_per_month=9999, max_ai_resolutions_per_month=9999)
-        ]
-
-        for p in plans:
-            existing = db.query(models.SubscriptionPlan).filter(models.SubscriptionPlan.id == p.id).first()
-            if not existing:
-                db.add(p)
-
-        # Seed Superadmin
-        sa_email = "admin@aether.ai"
-        sa = db.query(models.User).filter(models.User.email == sa_email).first()
-        if not sa:
-            logger.info("Seeding superadmin account...")
-            sa_password = settings.superadmin_password
-
-            company = models.Company(name="Aether Systems", industry="SaaS", onboarding_completed="true", plan_id="plan_enterprise")
-            db.add(company)
-            db.commit()
-            db.refresh(company)
-
-            user = models.User(
-                email=sa_email,
-                full_name="Platform Creator",
-                password_hash=get_password_hash(sa_password),
-                role="superadmin",
-                company_id=company.id
-            )
-            db.add(user)
-
-        db.commit()
-    except Exception as e:
-        logger.error(f"Error seeding database: {e}")
-    finally:
-        db.close()
-
-seed_database()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for FastAPI to handle global resources."""
     # The LangGraph checkpointer (sqlite or Postgres, see
-    # src/agent/checkpointer.py) is opened once for the whole app. It's
-    # opened before the MCP subprocess so a misconfigured backend fails fast
-    # without leaving an orphan tool server behind.
+    # src/agents/runtime/checkpointer.py) is opened once for the whole app.
+    # It's opened before the MCP subprocess so a misconfigured backend fails
+    # fast without leaving an orphan tool server behind.
     async with open_checkpointer(settings) as checkpointer:
         logger.info("Starting MCP tool server subprocess")
         mcp_client = MCPToolClient()
@@ -105,7 +51,7 @@ async def lifespan(app: FastAPI):
             app.state.checkpointer = checkpointer
             app.state.mcp_client = mcp_client
             if settings.jobs_embedded_worker:
-                # Same queue a standalone `python -m src.jobs.worker` drains;
+                # Same queue a standalone `python -m src.worker` drains;
                 # embedded is just the zero-setup option for development.
                 worker = build_worker(WorkerDeps(checkpointer, mcp_client), settings)
                 worker_task = asyncio.create_task(worker.run_forever(stop_worker))
@@ -117,36 +63,43 @@ async def lifespan(app: FastAPI):
             await mcp_client.close()
     logger.info("Shut down checkpointer and MCP tool server")
 
-app = FastAPI(
-    title="ITSM Agent API",
-    description="API for the AI-powered IT Support Agent using Nebius Token Factory",
-    version="1.0.0",
-    lifespan=lifespan
-)
 
-# Configure rate limiting
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, lambda req, exc: Response(content="Rate limit exceeded", status_code=429))
-app.add_middleware(SlowAPIMiddleware)
-app.add_middleware(RequestIdMiddleware)
+def create_app() -> FastAPI:
+    # Schema changes are Alembic migrations (migrations/, roadmap 1.4), applied
+    # by `alembic upgrade head` / `python -m src.db.migrate` as a deploy step.
+    # Only with DB_AUTO_MIGRATE=true (dev, tests) does startup apply them
+    # itself — a shared database is never altered just because an API started.
+    if settings.db_auto_migrate:
+        upgrade_to_head(engine)
+    seed_database()
 
-# Configure CORS for frontend access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.get_cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    app = FastAPI(
+        title="ITSM Agent API",
+        description="API for the AI-powered IT Support Agent using Nebius Token Factory",
+        version="1.0.0",
+        lifespan=lifespan
+    )
 
-app.include_router(webhook_router, prefix="/api")
-app.include_router(auth_router, prefix="/api")
-app.include_router(tenant_router, prefix="/api")
-app.include_router(user_router, prefix="/api")
-app.include_router(rag_router, prefix="/api")
-app.include_router(log_drain_router, prefix="/api")
-app.include_router(observability_router, prefix="/api")
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, lambda req, exc: Response(content="Rate limit exceeded", status_code=429))
+    app.add_middleware(SlowAPIMiddleware)
+    app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.get_cors_origins_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-@app.get("/health")
-async def health_check():
-    return {"status": "ok", "message": "ITSM Agent API is running"}
+    for module in ROUTERS:
+        app.include_router(module.router, prefix="/api")
+
+    @app.get("/health")
+    async def health_check():
+        return {"status": "ok", "message": "ITSM Agent API is running"}
+
+    return app
+
+
+app = create_app()

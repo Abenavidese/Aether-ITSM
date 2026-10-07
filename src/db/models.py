@@ -38,11 +38,11 @@ class Company(Base):
     # JSON-encoded list of {"name": str, "url": str} — services the agent can
     # healthcheck via the check_service_status MCP tool (see src/tools/mcp_server.py).
     # Optional per-entry {"provider", "service_id", "owner_id"} link a service
-    # to its hosting platform's logs (Fase 10, src/integrations/logs/).
+    # to its hosting platform's logs (Fase 10, src/integrations/platform_logs/).
     monitored_services = Column(String, nullable=True)
     # Fernet-encrypted, never returned by the API (always "MASKED"). A Render
     # API key has FULL account access (Render has no read-only key scope), so
-    # read-only is enforced in code: src/integrations/logs/readonly_http.py.
+    # read-only is enforced in code: src/integrations/platform_logs/readonly_http.py.
     render_api_key = Column(String, nullable=True)
     # Fernet-encrypted shared secret Vercel signs Log Drain payloads with.
     vercel_drain_secret = Column(String, nullable=True)

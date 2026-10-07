@@ -6,7 +6,7 @@ import httpx
 # mcp>=2.0 renamed FastMCP -> MCPServer (same decorator-based API otherwise).
 from mcp.server.mcpserver import MCPServer
 
-from src.config import get_settings
+from src.core.config import get_settings
 from src.security.url_guard import UnsafeURLError, validate_outbound_url
 
 logger = logging.getLogger(__name__)

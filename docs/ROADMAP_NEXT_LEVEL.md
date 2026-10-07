@@ -24,7 +24,7 @@ Son arreglos baratos que evitan que una revisión de código encuentre promesas 
 ### 1.1 La imagen del chat no se envía
 En el portal del empleado se puede adjuntar una imagen y el UI la muestra en la
 burbuja, pero `frontend/src/features/portal/hooks/useChat.ts` solo manda
-`{ message }`. `ChatPayload` (`src/api/routes.py`) ni siquiera tiene el campo.
+`{ message }`. `ChatPayload` (`src/api/routers/tickets.py`) ni siquiera tiene el campo.
 El backend nunca la recibe.
 
 - Opción A: enviarla (`image_base64` en `ChatPayload`, con la misma validación
@@ -36,7 +36,7 @@ no existe.
 
 ### 1.2 Configuración que no hace nada
 `llm_engine`, `webhook_url` y `mcp_server_url` se guardan en `Company` y se
-muestran en Settings (`src/tenant/router.py`), pero ningún código los usa.
+muestran en Settings (`src/api/routers/tenant.py`), pero ningún código los usa.
 
 **CHECK:** cada campo de Settings tiene efecto real o se elimina (modelo, API y UI).
 
@@ -169,8 +169,8 @@ filtro olvidado no expone datos de otra empresa.
 el `tenant_id` de sesión fijado, no devuelve filas de otro tenant (test contra
 Postgres).
 
-### 2.6 Refactor de `src/agent/concierge.py` (747 líneas)
-**Estado: HECHO (2026-09-26).** Paquete `src/agent/concierge/`.
+### 2.6 Refactor de `src/agents/concierge.py` (747 líneas)
+**Estado: HECHO (2026-09-26).** Paquete `src/agents/concierge/`.
 Separar en módulos con responsabilidades claras:
 - navegación del repo (árbol, rutas, lectura de archivos);
 - diagnóstico de servicios;

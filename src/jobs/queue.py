@@ -17,7 +17,7 @@ Protocol:
   after max_attempts (the caller then runs the kind's dead-letter handler).
 
 Delivery is at-least-once: a handler may run again after a crash, so
-handlers must be idempotent (see src/tickets/jobs.py).
+handlers must be idempotent (see src/services/ticket_runs.py).
 """
 import json
 from dataclasses import dataclass

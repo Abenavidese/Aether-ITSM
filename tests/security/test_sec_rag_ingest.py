@@ -9,10 +9,10 @@ from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 from starlette.datastructures import UploadFile
 
+from src.api.routers.knowledge import UPLOAD_DIR
 from src.rag.documents import RegisterOutcome
 from src.rag.ingest_guard import UploadRejected, sanitize_filename, store_upload, validate_content
 from src.rag.parsing import ParsedDocument
-from src.rag.router import UPLOAD_DIR
 from src.security.redaction import redact_document
 
 
@@ -145,7 +145,7 @@ def test_path_traversal_upload_cannot_touch_the_codebase(admin_client, monkeypat
     def fake_register(tenant_id, user_id, filename, source_type, parsed, size_bytes=None):
         seen["filename"] = filename
         return RegisterOutcome("doc-1", 1, "queued", unchanged=False)
-    monkeypatch.setattr("src.rag.router.parse_file", fake_parse)
+    monkeypatch.setattr("src.api.routers.knowledge.parse_file", fake_parse)
     monkeypatch.setattr("src.rag.documents.register_upload", fake_register)
 
     response = admin_client.post("/api/tenant/knowledge", data={"source_type": "company_policy"},

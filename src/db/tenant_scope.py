@@ -7,7 +7,7 @@ returns nothing instead of another company's rows.
 
 How a session becomes tenant-scoped:
     with tenant_session(tenant_id) as db: ...        # service code
-    db: Session = Depends(get_tenant_db)             # route handlers
+    db: Session = Depends(get_tenant_db)             # route handlers (src/api/deps.py)
 Either way the tenant id rides in Session.info (not a ContextVar: sync DB
 work runs in worker threads, where context changes don't flow back). On
 every transaction begin, the listener below runs, for Postgres only:
@@ -26,12 +26,10 @@ DB_RLS_ENABLED stays false and this listener does nothing.
 from contextlib import contextmanager
 from typing import Generator
 
-from fastapi import Depends
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 
-from src.config import get_settings
-from src.security.deps import get_current_user
+from src.core.config import get_settings
 
 from .database import SessionLocal
 
@@ -63,9 +61,3 @@ def tenant_session(tenant_id: str, **kwargs) -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
-
-def get_tenant_db(current_user=Depends(get_current_user)) -> Generator[Session, None, None]:
-    """FastAPI dependency: a session scoped to the caller's tenant."""
-    with tenant_session(current_user.company_id) as db:
-        yield db

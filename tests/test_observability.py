@@ -9,7 +9,7 @@ from fakes import RecordingMCP, ScriptedLLM
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 
-from src.agent.state import ClassificationResult, ExecutionPlanResult, PolicyCheckResult
+from src.agents.ticket_flow.state import ClassificationResult, ExecutionPlanResult, PolicyCheckResult
 from src.db import models
 from src.db.database import SessionLocal, engine
 from src.jobs.worker import WorkerDeps
@@ -17,8 +17,8 @@ from src.observability import tracing
 from src.observability.logging import ContextFilter, JsonFormatter
 from src.observability.usage import percentile, usage_summary
 from src.security.hashing import get_password_hash
-from src.tickets import jobs as ticket_jobs
-from src.tickets import service
+from src.services import ticket_runs as ticket_jobs
+from src.services import tickets as service
 
 
 @pytest.fixture(autouse=True)
@@ -55,9 +55,9 @@ def _run_ticket(monkeypatch, tenant_id, api_key, employee, external_id):
                     ExecutionPlanResult(resolution_summary="reset", tool_name="reset_vpn_session"),
                     input_tokens=400, output_tokens=40),
     )
-    monkeypatch.setattr("src.agent.nodes.get_llms", lambda: llms)
-    monkeypatch.setattr("src.agent.nodes.get_monitored_services", lambda t: [])
-    monkeypatch.setattr("src.agent.nodes.retrieve_context", lambda *a, **kw: "")
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_llms", lambda: llms)
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.get_monitored_services", lambda t: [])
+    monkeypatch.setattr("src.agents.ticket_flow.nodes.common.retrieve_context", lambda *a, **kw: "")
     db = SessionLocal()
     try:
         ticket = db.query(models.Ticket).filter(models.Ticket.tenant_id == tenant_id,
@@ -88,7 +88,7 @@ def test_a_ticket_run_is_traced_node_by_node_with_tokens(admin, monkeypatch):
 def test_usage_summary_prices_tokens_and_reports_percentiles(admin, monkeypatch):
     tenant_id, api_key, _, employee = admin
     _run_ticket(monkeypatch, tenant_id, api_key, employee, "OBS-2")
-    from src.config import get_settings
+    from src.core.config import get_settings
     monkeypatch.setattr(get_settings(), "llm_prices_json", json.dumps({"scripted-model": [1.0, 2.0]}))
     summary = usage_summary(tenant_id)
     totals = summary["totals"]

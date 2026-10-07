@@ -28,14 +28,14 @@ sys.stdout.reconfigure(encoding="utf-8")
 from langchain_core.messages import HumanMessage  # noqa: E402
 from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 
-from src.agent import nodes as nodes_module  # noqa: E402
-from src.agent.concierge import get_concierge_workflow  # noqa: E402
-from src.agent.concierge import node as concierge_node_module  # noqa: E402
-from src.agent.concierge import repo_access as concierge_repo_module  # noqa: E402
-from src.agent.graph import get_workflow  # noqa: E402
-from src.agent.mcp_client import MCPToolClient  # noqa: E402
+from src.agents.concierge import get_concierge_workflow  # noqa: E402
+from src.agents.concierge import node as concierge_node_module  # noqa: E402
+from src.agents.concierge import repo_access as concierge_repo_module  # noqa: E402
+from src.agents.ticket_flow.graph import get_workflow  # noqa: E402
+from src.agents.ticket_flow.nodes import common as nodes_module  # noqa: E402
 from src.db.database import SessionLocal  # noqa: E402
 from src.db.models import Company, User  # noqa: E402
+from src.tools.mcp_client import MCPToolClient  # noqa: E402
 
 RESULTS: list[tuple[str, str, str]] = []
 

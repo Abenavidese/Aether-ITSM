@@ -8,7 +8,7 @@
 > describe lo hecho el 13 de septiembre. Correcciones: el "streaming asíncrono en tiempo
 > real" hacia el frontend **no existe** (Planned, roadmap 3.1); el selector de "motor LLM
 > preferido" se **eliminó** porque no tenía efecto (los modelos son configuración de la
-> plataforma, `src/config.py`); la base de datos ya no es solo SQLite (Postgres/Supabase +
+> plataforma, `src/core/config.py`); la base de datos ya no es solo SQLite (Postgres/Supabase +
 > migraciones Alembic); la cookie usa `Secure` solo con `COOKIE_SECURE=true`. El historial
 > vivo de cambios está en `docs/PLAN_IMPLEMENTACION.txt`.
 
@@ -60,14 +60,14 @@ Se resolvieron satisfactoriamente 9 incidentes reportados (5 críticos, 4 medios
    - **Solución:** Modificada para depender exclusivamente de `os.environ.get("SUPERADMIN_PASSWORD")` vía variables de entorno.
 4. **Elevación de privilegios en el Registro:**
    - **Problema:** El formulario permitía enviar `role="superadmin"`.
-   - **Solución:** El backend fue refactorizado para forzar `role="admin"` directamente en el servicio de creación (`src/auth/service.py`), ignorando cualquier inyección del cliente.
+   - **Solución:** El backend fue refactorizado para forzar `role="admin"` directamente en el servicio de creación (`src/services/auth.py`), ignorando cualquier inyección del cliente.
 5. **JWT en localStorage (Vulnerable a XSS):**
    - **Problema:** Se guardaban tokens de autenticación en texto plano en el frontend.
    - **Solución:** Migración completa a **HttpOnly, Secure Cookies**. Se eliminó la gestión manual del token y ahora la sesión es validada automáticamente por el navegador a través del endpoint `/api/auth/me`.
 
 #### 🟡 Medios (Estabilidad y Rendimiento)
 6. **I/O bloqueante (requests síncrono):**
-   - **Problema:** `requests.get()` en `src/tenant/router.py` bloqueaba el event loop.
+   - **Problema:** `requests.get()` en `src/api/routers/tenant.py` bloqueaba el event loop.
    - **Solución:** Implementación de `httpx.AsyncClient().get()` con un endpoint 100% asíncrono.
 7. **Reutilización del `JWT_SECRET_KEY` para encriptación:**
    - **Problema:** Derivaba de la llave del token para crear las llaves de los tokens de GitHub.

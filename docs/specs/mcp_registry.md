@@ -2,8 +2,8 @@
 
 > **Status** (reviewed against the code on 2026-09-26, roadmap 1.3): the MCP *protocol*
 > path is **Implemented** — a real MCP server (`src/tools/mcp_server.py`) over stdio, a
-> client that reads its live catalog (`src/agent/mcp_client.py`) and a default-deny policy
-> in code (`src/agent/tool_policy.py`). The tool *backends* are **simulated**: except
+> client that reads its live catalog (`src/tools/mcp_client.py`) and a default-deny policy
+> in code (`src/tools/tool_policy.py`). The tool *backends* are **simulated**: except
 > `check_service_status`, every tool returns a canned JSON result and touches no real
 > VPN, MDM, IAM or knowledge system. Wiring them to real systems is **Planned**.
 
@@ -15,7 +15,7 @@ whether it runs. The model never executes scripts.
 ## 2. Tool Inventory
 
 Risk levels and parameters below are the ones enforced by `TOOL_POLICY` in
-`src/agent/tool_policy.py` — the source of truth; tools not listed there are refused.
+`src/tools/tool_policy.py` — the source of truth; tools not listed there are refused.
 
 ### 2.1 `reset_vpn_session` — risk 2 — backend simulated
 - **Parameters:** `user_id` — an *identity* parameter: bound to the ticket's requester by
@@ -47,7 +47,7 @@ Risk levels and parameters below are the ones enforced by `TOOL_POLICY` in
   `ToolPolicyViolation` before any call; the node escalates (or raises the ticket's risk once
   and re-runs Policy, for a tool that simply needs more approval).
 - **Retries — Implemented, differently than first specified.** The original doc said
-  exactly 1 retry. `src/agent/structured_output.py` allows 2 self-correction retries for
+  exactly 1 retry. `src/llm/structured_output.py` allows 2 self-correction retries for
   output that fails schema validation, re-sending the original prompt plus a short error
   summary (never the failed output). After that the node reports `technical_error` and the
   graph escalates.

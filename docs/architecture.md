@@ -7,7 +7,7 @@ This document defines the technical architecture, component interactions, and da
 > diagrams in §2-§3 are the *target* design. What differs today:
 > - **Implemented:** FastAPI webhook (202) → durable job queue in the same database
 >   (`src/jobs/`, not `BackgroundTasks`) → LangGraph graph (§4) with a checkpointer that is
->   Postgres or SQLite (`src/agent/checkpointer.py`); MCP tools over stdio; employee chat
+>   Postgres or SQLite (`src/agents/runtime/checkpointer.py`); MCP tools over stdio; employee chat
 >   (Concierge) with RAG, repo reading, read-only platform logs and screenshot reading by a
 >   vision model; GitHub issues on escalation; Alembic migrations; Docker Compose stack.
 > - **Planned:** ITSM API calls back into Jira/ServiceNow (comment, resolve, approve there);
@@ -137,14 +137,14 @@ class AgentState(TypedDict):
 ```
 
 ### 4.2 Core Nodes
-Implemented node names (`src/agent/nodes.py`, `src/agent/graph.py`) differ slightly from the original naming above — this reflects the actual graph:
-1.  **`supervisor` node:** Calls the "nano" model. Reads the ticket and assigns `assessed_risk` (0-4), then `enforce_risk_floor()` (`src/agent/risk_policy.py`) raises it further if the text matches a hardcoded high-risk pattern (IAM, production DB, firewall) — this floor exists precisely because the model's own classification isn't trusted as the final word. Routes to `policy`, `execution`, or `escalate`.
+Implemented node names (`src/agents/ticket_flow/nodes/`, one module per node; wiring in `src/agents/ticket_flow/graph.py`) differ slightly from the original naming above — this reflects the actual graph:
+1.  **`supervisor` node:** Calls the "nano" model. Reads the ticket and assigns `assessed_risk` (0-4), then `enforce_risk_floor()` (`src/agents/ticket_flow/risk_policy.py`) raises it further if the text matches a hardcoded high-risk pattern (IAM, production DB, firewall) — this floor exists precisely because the model's own classification isn't trusted as the final word. Routes to `policy`, `execution`, or `escalate`.
 2.  **`policy` node:** Reached for Risk 1-3. Calls the "super" model against the tenant's `company_policy` RAG documents to decide `is_compliant`. Routes to `execution` (Risk 0-2, compliant), `draft_plan` (Risk 3, compliant), or `escalate` (non-compliant).
-3.  **`execution` node:** Reached for Risk 0-2, or after a Risk 3 plan is approved. Calls the "super" model against `technical_repo`/`ai_feedback` RAG, and dispatches a real tool call through the MCP client (`src/agent/mcp_client.py`) when `tool_name` is set in its structured output — never free-form code, never a narrated-only "as if" execution.
+3.  **`execution` node:** Reached for Risk 0-2, or after a Risk 3 plan is approved. Calls the "super" model against `technical_repo`/`ai_feedback` RAG, and dispatches a real tool call through the MCP client (`src/tools/mcp_client.py`) when `tool_name` is set in its structured output — never free-form code, never a narrated-only "as if" execution.
 4.  **`draft_plan` node:** Reached for Risk 3 (compliant). Drafts `proposed_plan` and the graph pauses (`interrupt_after=["draft_plan"]`) until `POST /api/approve/{ticket_id}` resumes it. On approval it proceeds to `execution` with the approved plan in context; on rejection it routes to `escalate` instead of dead-ending.
-5.  **`escalate` node:** Reached for Risk 4, non-compliant requests, a rejected plan, or any node-level technical failure. Produces the escalation summary; the orchestration layer (not the graph itself) then enqueues a `create_github_issue` job (`src/tickets/jobs.py`) that opens a GitHub Issue for the engineering team if the tenant has GitHub configured (`src/integrations/github.py`), with retries, and records the link on the ticket.
+5.  **`escalate` node:** Reached for Risk 4, non-compliant requests, a rejected plan, or any node-level technical failure. Produces the escalation summary; the orchestration layer (not the graph itself) then enqueues a `create_github_issue` job (`src/services/ticket_runs.py`) that opens a GitHub Issue for the engineering team if the tenant has GitHub configured (`src/integrations/github.py`), with retries, and records the link on the ticket.
 
-Attached images never enter the graph as images: `src/agent/vision.py` reads them into text before the first node (webhook tickets and chat alike), so every node and every deterministic check works on plain text.
+Attached images never enter the graph as images: `src/agents/runtime/vision.py` reads them into text before the first node (webhook tickets and chat alike), so every node and every deterministic check works on plain text.
 
 There is no `human_interrupt_node` as a separate graph node — the pause is `interrupt_after` on `draft_plan` itself, and no Nemotron-Ultra / deep-log-analysis step exists yet for `escalate`; it's the same "super" model doing what `policy`/`execution` do.
 
@@ -164,7 +164,7 @@ We will use the OpenAI-compatible SDK to interact with Nebius.
 *   Model routing is handled at the LangGraph node level by passing different `model_name` strings depending on the required cognitive load.
 
 ### 5.2 NVIDIA OpenShell & FastMCP
-**Implemented today:** all tools are hosted by a standalone MCP server (`src/tools/mcp_server.py`, built on `mcp.server.mcpserver.MCPServer` — the `mcp>=2.0` successor to the older `FastMCP` class). LangGraph does not import these tools directly; `src/agent/mcp_client.py` connects to the server as an MCP client over `stdio`, one long-lived connection per app process (opened in FastAPI's `lifespan`, see `src/main.py`), not spawned per ticket.
+**Implemented today:** all tools are hosted by a standalone MCP server (`src/tools/mcp_server.py`, built on `mcp.server.mcpserver.MCPServer` — the `mcp>=2.0` successor to the older `FastMCP` class). LangGraph does not import these tools directly; `src/tools/mcp_client.py` connects to the server as an MCP client over `stdio`, one long-lived connection per app process (opened in FastAPI's `lifespan`, see `src/main.py`), not spawned per ticket.
 
 **Not implemented yet:** the OpenShell sandboxing described below. The server process today is a plain local subprocess with no network/filesystem/process isolation enforced — see `docs/security_guardrails.md` §3.1 for the current risk assessment of that gap.
 *   **Process Isolation:** MCP server runs as an independent subprocess (true today — but "independent" ≠ "sandboxed"; it can still make arbitrary syscalls).

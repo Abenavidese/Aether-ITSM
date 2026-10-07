@@ -20,7 +20,7 @@ Or everything in containers: `docker compose up --build` → http://localhost:80
 
 - **Windows + Postgres checkpointer:** psycopg async can't run on the ProactorEventLoop;
   start uvicorn with `--reload` (or `--loop asyncio:SelectorEventLoop`).
-- **Production worker:** set `JOBS_EMBEDDED_WORKER=False` and run `python -m src.jobs.worker`.
+- **Production worker:** set `JOBS_EMBEDDED_WORKER=False` and run `python -m src.worker`.
 - **Webhook from outside (optional):** `ngrok http 8000`.
 
 ## 2. Checks
@@ -59,7 +59,7 @@ blocked by it today.
 
 ## 4. Modifying risk policies safely
 Do not prompt the LLM to change risk logic — it lives in code:
-- Minimum risk by ticket wording: `src/agent/risk_policy.py` (`enforce_risk_floor`).
-- Risk, parameters and validators per tool: `TOOL_POLICY` in `src/agent/tool_policy.py`.
+- Minimum risk by ticket wording: `src/agents/ticket_flow/risk_policy.py` (`enforce_risk_floor`).
+- Risk, parameters and validators per tool: `TOOL_POLICY` in `src/tools/tool_policy.py`.
   To make software installs require approval, set `provision_standard_software` to risk 3.
 Add a test in `tests/security/` and re-run the evals after any change.

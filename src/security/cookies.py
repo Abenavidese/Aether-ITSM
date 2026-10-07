@@ -7,7 +7,7 @@ back under different Secure/SameSite semantics.
 """
 from fastapi import Response
 
-from src.config import get_settings
+from src.core.config import get_settings
 
 ACCESS_TOKEN_COOKIE = "access_token"
 
